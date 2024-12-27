@@ -232,6 +232,7 @@ int pci_trace_irq_pin(pci_addr_t addr, int pci_irq) {
 
 
 
+#ifdef PORT_ENABLE_DTB
 // Extract ranges from DTB.
 static bool pci_dtb_ranges(dtb_handle_t *handle, dtb_node_t *node) {
     dtb_prop_t *ranges = dtb_get_prop(handle, node, "ranges");
@@ -385,6 +386,7 @@ static void
     // TODO: Find FU740 PCIe configuration space.
     pcie_controller_init();
 }
+#endif
 
 
 
@@ -393,7 +395,9 @@ DRIVER_DECL(pcie_driver) = {
     .type             = DRIVER_TYPE_DTB,
     .dtb_supports_len = 1,
     .dtb_supports     = (char const *[]){"pci-host-ecam-generic"},
-    .dtb_init         = pcie_driver_dtbinit,
+#ifdef PORT_ENABLE_DTB
+    .dtb_init = pcie_driver_dtbinit,
+#endif
 };
 
 
@@ -411,6 +415,8 @@ DRIVER_DECL(pcie_fu740_driver) = {
     .type             = DRIVER_TYPE_DTB,
     .dtb_supports_len = 1,
     .dtb_supports     = (char const *[]){"sifive,fu740-pcie"},
-    .dtb_init         = pcie_fu740_driver_dtbinit,
+#ifdef PORT_ENABLE_DTB
+    .dtb_init = pcie_fu740_driver_dtbinit,
+#endif
 };
 #endif

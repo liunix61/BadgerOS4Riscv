@@ -6,7 +6,9 @@
 
 
 #include "driver/pcie.h"
+#ifdef PORT_ENABLE_DTB
 #include "port/dtb.h"
+#endif
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -36,6 +38,7 @@ typedef struct {
             // Init from PCI / PCIe.
             driver_pci_init_t pci_init;
         };
+#ifdef PORT_ENABLE_DTB
         struct {
             // Number of DTB compatible keywords.
             size_t                   dtb_supports_len;
@@ -44,6 +47,7 @@ typedef struct {
             // Init from DTB.
             driver_dtb_init_t        dtb_init;
         };
+#endif
     };
 } driver_t;
 
