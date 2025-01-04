@@ -51,11 +51,11 @@ void   proc_unmap_raw(badge_err_t *ec, process_t *process, size_t vaddr, size_t 
 // Returns the lowest common denominator of the access bits.
 int    proc_map_contains_raw(process_t *proc, size_t vaddr, size_t size);
 // Add a file to the process file handle list.
-int    proc_add_fd_raw(badge_err_t *ec, process_t *process, file_t real);
+file_t proc_add_fd_raw(badge_err_t *ec, process_t *process, file_t real);
 // Find a file in the process file handle list.
-file_t proc_find_fd_raw(badge_err_t *ec, process_t *process, int virt);
+file_t proc_find_fd_raw(badge_err_t *ec, process_t *process, file_t virt);
 // Remove a file from the process file handle list.
-void   proc_remove_fd_raw(badge_err_t *ec, process_t *process, int virt);
+void   proc_remove_fd_raw(badge_err_t *ec, process_t *process, file_t virt);
 
 // Perform a pre-resume check for a user thread.
 // Used to implement asynchronous events.
