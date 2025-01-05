@@ -41,6 +41,9 @@ bool fs_ramfs_dir_find_ent(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, dirent_t *ent, char const *name, size_t name_len
 );
 
+// Stat a file object.
+void fs_ramfs_stat(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat);
+
 // Open a file handle for the root directory.
 void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);
 // Open a file for reading and/or writing.

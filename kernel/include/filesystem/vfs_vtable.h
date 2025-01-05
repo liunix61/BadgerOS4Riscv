@@ -37,6 +37,9 @@ typedef bool (*vfs_dir_find_ent_t)(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, dirent_t *ent, char const *name, size_t name_len
 );
 
+// Stat a file object.
+typedef void (*vfs_stat_t)(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat);
+
 // Open a file handle for the root directory.
 typedef void (*vfs_root_open_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);
 // Open a file for reading and/or writing.
@@ -75,6 +78,7 @@ typedef struct {
     vfs_exists_t       exists;
     vfs_dir_read_t     dir_read;
     vfs_dir_find_ent_t dir_find_ent;
+    vfs_stat_t         stat;
     vfs_root_open_t    root_open;
     vfs_file_open_t    file_open;
     vfs_file_close_t   file_close;

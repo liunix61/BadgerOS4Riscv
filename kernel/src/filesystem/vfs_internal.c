@@ -192,6 +192,7 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     if (!fobj->cookie) {
         goto err1;
     }
+    mutex_init(NULL, &fobj->mutex, true, false);
 
     // Open new file object.
     dir->vfs->vtable.file_open(ec, dir->vfs, dir, fobj, name, name_len);
@@ -221,7 +222,7 @@ vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig) {
 
 // Close a file opened by `vfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-void vfs_file_close(vfs_file_obj_t *file) {
+void vfs_file_drop_ref(vfs_file_obj_t *file) {
     if (atomic_fetch_sub(&file->refcount, 1) == 1) {
         file->vfs->vtable.file_close(file->vfs, file);
         free(file->cookie);

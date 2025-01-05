@@ -448,6 +448,18 @@ bool fs_ramfs_dir_find_ent(
 
 
 
+// Stat a file object.
+void fs_ramfs_stat(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat) {
+    stat->links = RAMFILE(file)->links;
+    stat->gid   = RAMFILE(file)->gid;
+    stat->uid   = RAMFILE(file)->uid;
+    stat->size  = RAMFILE(file)->len;
+    stat->inode = RAMFILE(file)->inode;
+    stat->mode  = RAMFILE(file)->mode;
+}
+
+
+
 // Open a file handle for the root directory.
 void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
     assert_always(mutex_acquire_shared(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));

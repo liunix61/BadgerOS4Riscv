@@ -62,6 +62,8 @@ typedef long inode_t;
 typedef int64_t file_t;
 // Type used for file offsets.
 typedef int64_t fileoff_t;
+// Type used for file modes.
+typedef int     mode_t;
 
 // Modes for VFS seek.
 typedef enum {
@@ -129,7 +131,7 @@ typedef struct stat {
     // Inode number.
     inode_t   inode;
     // File type and protection.
-    uint16_t  mode;
+    mode_t    mode;
     // Number of hard links.
     size_t    links;
     // Owner user ID.
@@ -196,11 +198,26 @@ void   fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len);
 // Create a new hard link from one path to another relative to their respective dirs.
 // If `*_at` is `FILE_NONE`, it is relative to the root dir.
 // Fails if `old_path` names a directory.
-void   fs_link(badge_err_t *ec, file_t old_at, char const *old_path, file_t new_at, char const *new_path);
+void   fs_link(
+      badge_err_t *ec,
+      file_t       old_at,
+      char const  *old_path,
+      size_t       old_path_len,
+      file_t       new_at,
+      char const  *new_path,
+      size_t       new_path_len
+  );
 // Create a new symbolic link from one path to another, the latter relative to a dir handle.
 // The `old_path` specifies a path that is relative to the symlink's location.
 // If `new_at` is `FILE_NONE`, it is relative to the root dir.
-void   fs_symlink(badge_err_t *ec, char const *old_path, file_t new_at, char const *new_path);
+void fs_symlink(
+    badge_err_t *ec,
+    char const  *target_path,
+    size_t       target_path_len,
+    file_t       link_at,
+    char const  *link_path,
+    size_t       link_path_len
+);
 
 // Close a file opened by `fs_open`.
 // Only raises an error if `file` is an invalid file descriptor.

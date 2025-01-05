@@ -17,7 +17,7 @@ static size_t            files_len, files_cap;
 static vfs_file_desc_t **files;
 static file_t            fileno_ctr;
 
-static mutex_t dirs_mtx;
+static mutex_t dirs_mtx = MUTEX_T_INIT_SHARED;
 
 typedef struct {
     vfs_file_obj_t *parent;
@@ -70,7 +70,7 @@ static walk_t walk(badge_err_t *ec, vfs_file_obj_t *dirfd, char const *path, siz
         if (path[0] == '/' && (!dirfd || dirfd->type != FILETYPE_DIR)) {
             // Not a directory.
             if (out.parent) {
-                vfs_file_close(out.parent);
+                vfs_file_drop_ref(out.parent);
                 out.parent = NULL;
                 badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
             }
@@ -99,7 +99,7 @@ static walk_t walk(badge_err_t *ec, vfs_file_obj_t *dirfd, char const *path, siz
 
         // Open next file along path.
         if (out.parent) {
-            vfs_file_close(out.parent);
+            vfs_file_drop_ref(out.parent);
         }
         out.parent = dirfd;
         out.file   = vfs_file_open(ec, dirfd, path, delim);
@@ -124,7 +124,7 @@ static void fd_drop_ref(vfs_file_desc_t *fd) {
     int prev = atomic_fetch_sub(&fd->refcount, 1);
     if (prev == 1) {
         // All refs dropped; close FD.
-        vfs_file_close(fd->obj);
+        vfs_file_drop_ref(fd->obj);
         free(fd);
     }
 }
@@ -261,7 +261,7 @@ void fs_mount(
     // Mount the filesystem.
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
-    vfs_file_close(at_obj);
+    vfs_file_drop_ref(at_obj);
     if (!res.file) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
     } else {
@@ -275,10 +275,10 @@ void fs_mount(
         } else {
             badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
         }
-        vfs_file_close(res.file);
+        vfs_file_drop_ref(res.file);
     }
     if (res.parent) {
-        vfs_file_close(res.parent);
+        vfs_file_drop_ref(res.parent);
     }
     mutex_release(NULL, &dirs_mtx);
 }
@@ -333,15 +333,17 @@ void fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len
 
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
-    vfs_file_close(at_obj);
+    vfs_file_drop_ref(at_obj);
     if (res.file) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
-        vfs_file_close(res.file);
+        vfs_file_drop_ref(res.file);
     } else if (res.parent) {
         vfs_dir_create(ec, res.parent, res.filename, res.filename_len);
     }
     if (res.parent) {
-        vfs_file_close(res.parent);
+        vfs_file_drop_ref(res.parent);
+    } else {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
     }
     mutex_release(NULL, &dirs_mtx);
 }
@@ -432,7 +434,7 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
 
     // Walk the filesystem.
     walk_t res = walk(ec, at_obj, path, path_len, false);
-    vfs_file_close(at_obj);
+    vfs_file_drop_ref(at_obj);
     if (!res.file && res.parent && (oflags & OFLAGS_CREATE)) {
         // Create file if OFLAGS_CREATE is set.
         res.file = vfs_file_create(ec, res.parent, res.filename, res.filename_len);
@@ -449,8 +451,12 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
         mutex_release_shared(NULL, &dirs_mtx);
     }
 
+    if (res.parent) {
+        vfs_file_drop_ref(res.parent);
+    }
+
     if (!res.file) {
-        vfs_file_close(res.parent);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
         return FILE_NONE;
     }
 
@@ -467,7 +473,7 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
     // Insert handle into files array.
     if (!array_lencap_sorted_insert(&files, sizeof(void *), &files_len, &files_cap, &fd, vfs_file_desc_id_cmp)) {
         mutex_release(NULL, &files_mtx);
-        vfs_file_close(fd->obj);
+        vfs_file_drop_ref(fd->obj);
         free(fd);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
         return FILE_NONE;
@@ -488,27 +494,176 @@ void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
         return;
     }
+
+    // Get handle for relative directory.
+    vfs_file_obj_t *at_obj;
+    if (at == FILE_NONE) {
+        at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
+        if (!at_fd) {
+            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+            return;
+        }
+        at_obj = vfs_file_dup(at_fd->obj);
+        fd_drop_ref(at_fd);
+    }
+
+    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+
+    // Walk the filesystem.
+    walk_t res = walk(ec, at_obj, path, path_len, false);
+    vfs_file_drop_ref(at_obj);
+
+    if (res.file) {
+        vfs_unlink(ec, res.parent, res.filename, res.filename_len);
+    } else {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
+    }
+
+    mutex_release(NULL, &dirs_mtx);
+
+    // Clean up.
+    if (res.file) {
+        vfs_file_drop_ref(res.file);
+    }
+    if (res.parent) {
+        vfs_file_drop_ref(res.parent);
+    }
 }
 
 // Create a new hard link from one path to another relative to their respective dirs.
 // If `*_at` is `FILE_NONE`, it is relative to the root dir.
 // Fails if `old_path` names a directory.
-void fs_link(badge_err_t *ec, file_t old_at, char const *old_path, file_t new_at, char const *new_path) {
+void fs_link(
+    badge_err_t *ec,
+    file_t       old_at,
+    char const  *old_path,
+    size_t       old_path_len,
+    file_t       new_at,
+    char const  *new_path,
+    size_t       new_path_len
+) {
     if (!root_mounted) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
         logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
         return;
+    }
+
+    // Get handle for relative directory.
+    vfs_file_obj_t *new_at_obj;
+    if (new_at == FILE_NONE) {
+        new_at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *new_at_fd = get_dir_fd_ptr(ec, new_at);
+        if (!new_at_fd) {
+            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+            return;
+        }
+        new_at_obj = vfs_file_dup(new_at_fd->obj);
+        fd_drop_ref(new_at_fd);
+    }
+
+    vfs_file_obj_t *old_at_obj;
+    if (old_at == FILE_NONE) {
+        old_at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *old_at_fd = get_dir_fd_ptr(ec, old_at);
+        if (!old_at_fd) {
+            vfs_file_drop_ref(new_at_obj);
+            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+            return;
+        }
+        old_at_obj = vfs_file_dup(old_at_fd->obj);
+        fd_drop_ref(old_at_fd);
+    }
+
+    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+
+    // Walk the filesystem.
+    walk_t old_res = walk(ec, old_at_obj, old_path, old_path_len, false);
+    vfs_file_drop_ref(old_at_obj);
+    walk_t new_res = walk(ec, new_at_obj, new_path, new_path_len, false);
+    vfs_file_drop_ref(new_at_obj);
+
+    // Create hardlink.
+    if (new_res.file) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
+    } else if (!new_res.parent || !old_res.file) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
+    } else {
+        vfs_link(ec, old_res.file, new_res.parent, new_res.filename, new_res.filename_len);
+    }
+
+    mutex_release(NULL, &dirs_mtx);
+
+    // Clean up.
+    if (old_res.file) {
+        vfs_file_drop_ref(old_res.file);
+    }
+    if (old_res.parent) {
+        vfs_file_drop_ref(old_res.parent);
+    }
+    if (new_res.file) {
+        vfs_file_drop_ref(new_res.file);
+    }
+    if (new_res.parent) {
+        vfs_file_drop_ref(new_res.parent);
     }
 }
 
 // Create a new symbolic link from one path to another, the latter relative to a dir handle.
 // The `old_path` specifies a path that is relative to the symlink's location.
 // If `new_at` is `FILE_NONE`, it is relative to the root dir.
-void fs_symlink(badge_err_t *ec, char const *old_path, file_t new_at, char const *new_path) {
+void fs_symlink(
+    badge_err_t *ec,
+    char const  *target_path,
+    size_t       target_path_len,
+    file_t       link_at,
+    char const  *link_path,
+    size_t       link_path_len
+) {
     if (!root_mounted) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
         logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
         return;
+    }
+
+    // Get handle for relative directory.
+    vfs_file_obj_t *link_at_obj;
+    if (link_at == FILE_NONE) {
+        link_at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, link_at);
+        if (!at_fd) {
+            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+            return;
+        }
+        link_at_obj = vfs_file_dup(at_fd->obj);
+        fd_drop_ref(at_fd);
+    }
+
+    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+
+    // Walk the filesystem.
+    walk_t res = walk(ec, link_at_obj, link_path, link_path_len, false);
+    vfs_file_drop_ref(link_at_obj);
+
+    // Create symlink.
+    if (res.file) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
+    } else {
+        vfs_symlink(ec, target_path, target_path_len, res.parent, res.filename, res.filename_len);
+    }
+
+    mutex_release(NULL, &dirs_mtx);
+
+    // Clean up.
+    if (res.file) {
+        vfs_file_drop_ref(res.file);
+    }
+    if (res.parent) {
+        vfs_file_drop_ref(res.parent);
     }
 }
 
