@@ -18,7 +18,7 @@ lib/u-boot/u-boot.itb:
 	echo Build U-boot
 	make -C lib/u-boot OPENSBI=$(OPENSBI) CROSS_COMPILE=$(CROSS_COMPILE)
 	
-$(OUTPUT)/image.hdd: $(BUILDDIR)/cache/OVMF.fd $(OUTPUT)/badger-os.elf port/generic/limine.cfg $(OPENSBI) lib/u-boot/u-boot.itb
+$(OUTPUT)/image.hdd: $(BUILDDIR)/cache/OVMF.fd $(OUTPUT)/badger-os.elf port/generic/limine.conf $(OPENSBI) lib/u-boot/u-boot.itb
 	# Create boot filesystem
 	echo Create EFI filesystem
 	rm -rf $(BUILDDIR)/image.dir

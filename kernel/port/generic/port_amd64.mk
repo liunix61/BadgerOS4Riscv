@@ -6,7 +6,7 @@ QEMU          ?= qemu-system-x86_64
 _cpu_on_config:
 
 
-$(OUTPUT)/image.hdd: $(OUTPUT)/badger-os.elf
+$(OUTPUT)/image.hdd: port/generic/limine.conf $(OUTPUT)/badger-os.elf
 	# Create boot filesystem
 	echo Create EFI filesystem
 	rm -rf $(BUILDDIR)/image.dir
@@ -15,7 +15,7 @@ $(OUTPUT)/image.hdd: $(OUTPUT)/badger-os.elf
 	make -C lib/limine
 	cp lib/limine/BOOTX64.EFI $(BUILDDIR)/image.dir/EFI/BOOT/
 	cp lib/limine/limine-bios.sys $(BUILDDIR)/image.dir/boot/
-	cp port/generic/limine.cfg $(BUILDDIR)/image.dir/boot/
+	cp port/generic/limine.conf $(BUILDDIR)/image.dir/boot/
 	cp $(OUTPUT)/badger-os.elf $(BUILDDIR)/image.dir/boot/
 	
 	# Format FAT filesystem
@@ -48,8 +48,9 @@ clean-image:
 
 .PHONY: qemu
 qemu: image
+# -smp 1 -m 4G -accel kvm -cpu host
 	$(QEMU) -s \
-		-smp 2 -m 4G \
+		-d int -no-reboot -no-shutdown \
 		-device pcie-root-port,bus=pci.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-device virtio-scsi-pci,id=scsi \

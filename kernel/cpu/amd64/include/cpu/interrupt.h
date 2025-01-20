@@ -32,7 +32,7 @@ typedef __uint128_t x86_idtent_t;
 // Format an IDT entry.
 #define FORMAT_IDTENT(offset, segment, priv, is_int, ist)                                                              \
     (IDT_FLAG_P | ((priv) << IDT_FLAG_DPL_BASE) | ((segment) << 16) | ((offset) & 0xffff) |                            \
-     (((__uint128_t)(offset) & 0xffffffffffff0000) << 32))
+     (((__uint128_t)(offset) & 0xffffffffffff0000) << 32) | (is_int ? IDT_FLAG_GATE_INT : IDT_FLAG_GATE_TRAP))
 
 
 

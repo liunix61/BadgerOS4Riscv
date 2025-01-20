@@ -2,7 +2,7 @@
 
 # SPDX-License-Identifier: MIT
 
-import sys, subprocess, io
+import sys, subprocess, os
 from argparse import *
 
 assert __name__ == "__main__"
@@ -19,6 +19,8 @@ hexits = 16 if args.long else 8
 
 state = -2
 
+prefix = os.path.realpath('.') or ""
+
 def addr2line():
     global buf
     cmd = [
@@ -32,7 +34,10 @@ def addr2line():
     if string == '??:0': return
     if string.endswith('?'): return
     sys.stdout.write(" (")
-    sys.stdout.write(string)
+    if string.startswith(prefix):
+        sys.stdout.write(os.path.relpath(string))
+    else:
+        sys.stdout.write(string)
     sys.stdout.write(")")
 
 while True:

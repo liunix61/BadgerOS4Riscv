@@ -37,8 +37,8 @@ void kernel_reg_dump_arr(size_t const *arr) {
 
 #define DUMP_SEG(name, id)                                                                                             \
     {                                                                                                                  \
-        rawprint(name);                                                                                                \
-        rawprinthex(ctx->regs.id, sizeof(size_t) * 2);                                                                 \
+        rawprint(name "0x");                                                                                           \
+        rawprinthex(ctx->regs.id, 4);                                                                                  \
         rawputc('\n');                                                                                                 \
     }
 
@@ -51,12 +51,19 @@ void isr_ctx_dump(isr_ctx_t const *ctx) {
     DUMP_SEG("  ES  ", es);
     DUMP_SEG("  FS  ", fs);
     DUMP_SEG("  GS  ", gs);
-    rawprint("  CPUID   ");
-    rawprinthex(ctx->cpulocal->cpuid, sizeof(size_t) * 2);
+    rawprint("  GSBASE  0x");
+    rawprinthex(ctx->regs.gsbase, sizeof(size_t) * 2);
     rawputc('\n');
-    rawprint("  RFLAGS  ");
-    rawprinthex(ctx->cpulocal->cpuid, sizeof(size_t) * 2);
+    rawprint("  RFLAGS  0x");
+    rawprinthex(ctx->regs.rflags, sizeof(size_t) * 2);
     rawputc('\n');
+    if (ctx->cpulocal) {
+        rawprint("  CPUID   0x");
+        rawprinthex(ctx->cpulocal->cpuid, sizeof(size_t) * 2);
+        rawputc('\n');
+    } else {
+        rawprint("No CPU-local data (yet?)\n");
+    }
 }
 
 

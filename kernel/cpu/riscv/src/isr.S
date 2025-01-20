@@ -198,7 +198,7 @@
 
 
 
-    # Explicit context switch from M-mode.
+    # Explicit context switch.
     # Interrupts must be disabled on entry and will be re-enabled on exit.
     # If the context switch target is not set, this is a NOP.
     .text

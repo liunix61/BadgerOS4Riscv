@@ -17,14 +17,19 @@
 
 // Given stack frame pointer, perform backtrace.
 void backtrace_from_ptr(void *frame_pointer) {
-    rawprint("**** BEGIN BACKRTACE ****\n");
     // TODO.
-    rawprint("**** END BACKRTACE ****\n");
+    rawprint("TODO: Backtrace\n");
+    // rawprint("**** BEGIN BACKRTACE ****\n");
+    // rawprint("**** END BACKRTACE ****\n");
 }
 
 // Perform backtrace as called.
 void backtrace() NAKED;
 void backtrace() {
-    // TODO.
-    asm volatile("ret");
+    // clang-format off
+    asm volatile(
+        "mov %rdi, %rbp;"
+        "jmp backtrace_from_ptr;"
+    );
+    // clang-format on
 }

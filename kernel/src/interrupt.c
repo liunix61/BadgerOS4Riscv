@@ -2,8 +2,8 @@
 #include "interrupt.h"
 
 #include "assertions.h"
-#include "cpu/panic.h"
 #include "malloc.h"
+#include "panic.h"
 #include "spinlock.h"
 
 // This file implements ISRs by having a linked list per IRQ.

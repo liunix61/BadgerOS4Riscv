@@ -371,6 +371,7 @@ malformed_dtb:
     logk(LOG_WARN, "Initialization failed; ignoring this PCIe controller!");
 }
 
+#ifdef __riscv
 // DTB init for FU740 PCIe.
 static void
     pcie_fu740_driver_dtbinit(dtb_handle_t *handle, dtb_node_t *node, uint32_t addr_cells, uint32_t size_cells) {
@@ -387,36 +388,26 @@ static void
     pcie_controller_init();
 }
 #endif
+#endif
 
 
 
+#ifdef PORT_ENABLE_DTB
 // Driver for normal no-nonsense PCIe.
-DRIVER_DECL(pcie_driver) = {
+DRIVER_DECL(pcie_driver_dtb) = {
     .type             = DRIVER_TYPE_DTB,
     .dtb_supports_len = 1,
     .dtb_supports     = (char const *[]){"pci-host-ecam-generic"},
-#ifdef PORT_ENABLE_DTB
-    .dtb_init = pcie_driver_dtbinit,
-#endif
+    .dtb_init         = pcie_driver_dtbinit,
 };
 
-
-
 #ifdef __riscv
-// DTB init for FU740 PCIe.
-static void
-    pcie_fu740_driver_dtbinit(dtb_handle_t *handle, dtb_node_t *node, uint32_t addr_cells, uint32_t size_cells) {
-    ctl.type = PCIE_CTYPE_SIFIVE_FU740;
-    pcie_dtb_ranges(handle, node, addr_cells, size_cells);
-}
-
 // Driver for the factually stupid incoherent SiFive FU740 proprietary nonsense PCIe.
-DRIVER_DECL(pcie_fu740_driver) = {
+DRIVER_DECL(pcie_fu740_driver_dtb) = {
     .type             = DRIVER_TYPE_DTB,
     .dtb_supports_len = 1,
     .dtb_supports     = (char const *[]){"sifive,fu740-pcie"},
-#ifdef PORT_ENABLE_DTB
-    .dtb_init = pcie_fu740_driver_dtbinit,
-#endif
+    .dtb_init         = pcie_fu740_driver_dtbinit,
 };
+#endif
 #endif

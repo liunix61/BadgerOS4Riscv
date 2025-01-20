@@ -16,6 +16,8 @@
 static uint32_t ticks_per_sec;
 // Tick offset for the purpose of timekeeping.
 static uint64_t base_tick;
+// Use HPET (instead of legacy PIT).
+static bool     use_hpet;
 
 
 // Get the current time in ticks.
@@ -68,39 +70,10 @@ static void time_init_common() {
     time_init_generic();
 }
 
-// Initialise timer and watchdog subsystem.
-void time_init_dtb(dtb_handle_t *handle) {
-    dtb_node_t *cpus = dtb_get_node(handle, dtb_root_node(handle), "cpus");
-    if (!cpus) {
-        logkf(LOG_FATAL, "DTB missing `cpus` node");
-        panic_poweroff();
-    }
-    dtb_prop_t *timebase_freq = dtb_get_prop(handle, cpus, "timebase-frequency");
-    if (!timebase_freq) {
-        logkf(LOG_FATAL, "DTB node `cpus` missing prop `timebase-frequency`");
-        panic_poweroff();
-    }
-    if (timebase_freq->content_len != 4) {
-        logkf(
-            LOG_FATAL,
-            "DTB node `cpus` prop `timebase-frequency` has invalid length (expected 4, get %{u32;d})",
-            timebase_freq->content_len
-        );
-        panic_poweroff();
-    }
-    ticks_per_sec = dtb_prop_read_uint(handle, timebase_freq);
-    time_init_common();
-}
-
 // Get current time in microseconds.
 timestamp_us_t time_us() {
     if (!ticks_per_sec) {
         return 0;
     }
     return time_ticks() * 1000000 / ticks_per_sec;
-}
-
-// Called by the interrupt handler when the CPU-local timer fires.
-void amd64_sbi_timer_interrupt() {
-    time_cpu_timer_isr();
 }

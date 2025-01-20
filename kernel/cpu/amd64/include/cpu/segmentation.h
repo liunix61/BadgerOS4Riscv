@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "attributes.h"
+
 #include <stdint.h>
 
 
@@ -16,7 +18,7 @@
 /* DC access bit omitted - BadgerOS will never want to set it to 1. */
 // GDT access: executable.
 #define GDT_ACCESS_E        (1llu << 43)
-// GDT access: is a system descriptor.
+// GDT access: is NOT a system descriptor.
 #define GDT_ACCESS_S        (1llu << 44)
 // GDT access: privilege level bitmask.
 #define GDT_ACCESS_DPL_MASK (3llu << 45)
@@ -24,8 +26,12 @@
 #define GDT_ACCESS_DPL_BASE 45
 // GDT access: present.
 #define GDT_ACCESS_P        (1llu << 47)
+// Format base address for GDT.
+#define GDT_BASE(value)     ((((value) << 16) & 0x000000ffffff0000) | (((value) << 32) | 0xff00000000000000))
+// Format limit for GDT.
+#define GDT_LIMIT(value)    ((value) & 0xffff)
 
-// Format a segment value.
+// Format a segment value without address.
 #define FORMAT_SEGMENT(segno, use_local, privilege) (((segno) << 3) | ((use_local) << 2) | (privilege))
 
 // Segment number to use for kernel code.
@@ -36,3 +42,14 @@
 #define SEGNO_UCODE 3
 // Segment number to use for user data.
 #define SEGNO_UDATA 4
+
+// Data format for TSS.
+typedef struct PACKED {
+    uint32_t : 32;
+    uint64_t rsp[3];
+    uint64_t : 64;
+    uint64_t ist[7];
+    uint64_t : 64;
+    uint16_t : 16;
+    uint16_t iopb;
+} amd64_tss_t;

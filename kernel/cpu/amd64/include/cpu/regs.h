@@ -56,6 +56,7 @@ STRUCT_FIELD_QWORD(cpu_regs_t, r13)
 STRUCT_FIELD_QWORD(cpu_regs_t, r14)
 STRUCT_FIELD_QWORD(cpu_regs_t, r15)
 STRUCT_FIELD_QWORD(cpu_regs_t, rip)
+STRUCT_FIELD_QWORD(cpu_regs_t, gsbase)
 STRUCT_FIELD_DWORD(cpu_regs_t, rflags)
 STRUCT_FIELD_WORD(cpu_regs_t, cs)
 STRUCT_FIELD_WORD(cpu_regs_t, ds)
@@ -64,6 +65,18 @@ STRUCT_FIELD_WORD(cpu_regs_t, es)
 STRUCT_FIELD_WORD(cpu_regs_t, fs)
 STRUCT_FIELD_WORD(cpu_regs_t, gs)
 STRUCT_END(cpu_regs_t)
+
+
+
+// AMD64 automatically-pushed interrupt context.
+// This is used primarily by assembly.
+STRUCT_BEGIN(amd64_irqframe_t)
+STRUCT_FIELD_QWORD(amd64_irqframe_t, rip)
+STRUCT_FIELD_QWORD(amd64_irqframe_t, cs)
+STRUCT_FIELD_QWORD(amd64_irqframe_t, rflags)
+STRUCT_FIELD_QWORD(amd64_irqframe_t, rsp)
+STRUCT_FIELD_QWORD(amd64_irqframe_t, ss)
+STRUCT_END(amd64_irqframe_t)
 
 
 

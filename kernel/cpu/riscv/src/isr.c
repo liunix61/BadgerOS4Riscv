@@ -87,7 +87,7 @@ void riscv_trap_handler() {
         return;
     }
 
-    if (!(kctx->flags & ISR_CTX_FLAG_KERNEL)) {
+    if (!fault2 && !(kctx->flags & ISR_CTX_FLAG_KERNEL)) {
         switch (trapno) {
                 // Unknown trap? The kernel must have messed up, don't handle it.
             default: break;
@@ -98,9 +98,12 @@ void riscv_trap_handler() {
                 isr_ctx_swap(kctx);
                 return;
 
+#ifndef MEMMAP_VMEM
+                // Access faults should never happen with VMEM enabled; this is the kernel's failing.
             case RISCV_TRAP_IACCESS:
             case RISCV_TRAP_LACCESS:
             case RISCV_TRAP_SACCESS:
+#endif
             case RISCV_TRAP_IPAGE:
             case RISCV_TRAP_LPAGE:
             case RISCV_TRAP_SPAGE:
@@ -202,7 +205,7 @@ void riscv_trap_handler() {
 
     isr_ctx_dump(kctx);
 
-    if (status & (CSR_STATUS_PP_MASK << CSR_STATUS_PP_BASE_BIT) || !fault2) {
+    if ((status & (CSR_STATUS_PP_MASK << CSR_STATUS_PP_BASE_BIT)) || fault2) {
         // When the kernel traps it's a bad time.
         panic_poweroff();
     } else {

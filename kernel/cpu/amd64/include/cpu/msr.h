@@ -53,8 +53,8 @@ typedef union {
 // Read an MSR.
 static inline uint64_t msr_read(uint32_t address) {
     register uint32_t addr asm("ecx") = address;
-    register uint32_t lo asm("edx");
-    register uint32_t hi asm("eax");
+    register uint32_t lo asm("eax");
+    register uint32_t hi asm("edx");
     asm("rdmsr" : "=r"(lo), "=r"(hi) : "r"(addr) : "memory");
     return ((uint64_t)hi << 32) | lo;
 }
@@ -62,8 +62,8 @@ static inline uint64_t msr_read(uint32_t address) {
 // Write an MSR.
 static inline void msr_write(uint32_t address, uint64_t value) {
     register uint32_t addr asm("ecx") = address;
-    register uint32_t lo asm("edx")   = value;
-    register uint32_t hi asm("eax")   = value >> 32;
+    register uint32_t lo asm("eax")   = value;
+    register uint32_t hi asm("edx")   = value >> 32;
     asm volatile("wrmsr" ::"r"(lo), "r"(hi), "r"(addr) : "memory");
 }
 #endif

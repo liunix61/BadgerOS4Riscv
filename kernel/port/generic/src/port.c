@@ -13,7 +13,9 @@
 #include "port/dtparse.h"
 #include "port/hardware_allocation.h"
 #include "rawprint.h"
+#ifdef PORT_ENABLE_ACPI
 #include "uacpi/uacpi.h"
+#endif
 
 #include <stdbool.h>
 
@@ -58,6 +60,7 @@ static REQ struct limine_hhdm_request hhdm_req = {
 
 __attribute__((section(".requests_end"))) LIMINE_REQUESTS_END_MARKER;
 
+#ifdef PORT_ENABLE_ACPI
 // Returns the PHYSICAL address of the RSDP structure via *out_rsdp_address.
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
     if (rsdp_req.response) {
@@ -68,6 +71,7 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
         return UACPI_STATUS_NOT_FOUND;
     }
 }
+#endif
 
 
 
