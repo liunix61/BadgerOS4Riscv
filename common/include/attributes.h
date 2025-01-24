@@ -52,3 +52,9 @@
 
 // Volatile variables.
 #define VOLATILE volatile
+
+// Struct is little-endian.
+#define LITTLE_ENDIAN __attribute__((scalar_storage_order("little-endian")))
+
+// Struct is big-endian.
+#define BIG_ENDIAN __attribute__((scalar_storage_order("bog-endian")))

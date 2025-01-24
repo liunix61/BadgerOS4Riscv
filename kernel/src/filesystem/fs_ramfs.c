@@ -272,7 +272,7 @@ void fs_ramfs_umount(vfs_t *vfs) {
 // Insert a new file into the given directory.
 // If the file already exists, does nothing.
 void fs_ramfs_create_file(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len) {
-    create_file(ec, vfs, dir, name, name_len, FILETYPE_REG);
+    create_file(ec, vfs, dir, name, name_len, FILETYPE_FILE);
 }
 
 // Insert a new directory into the given directory.
@@ -449,7 +449,8 @@ bool fs_ramfs_dir_find_ent(
 
 
 // Stat a file object.
-void fs_ramfs_stat(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat) {
+void fs_ramfs_stat(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, stat_t *stat) {
+    (void)vfs;
     stat->links = RAMFILE(file)->links;
     stat->gid   = RAMFILE(file)->gid;
     stat->uid   = RAMFILE(file)->uid;
@@ -470,6 +471,7 @@ void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
     file->inode            = VFS_RAMFS_INODE_ROOT;
     file->refcount         = 1;
     file->type             = FILETYPE_DIR;
+    file->is_vfs_root      = true;
 
     iptr->links++;
 

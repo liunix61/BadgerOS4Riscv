@@ -34,12 +34,18 @@ struct vfs_file_obj {
     // No file or directory may have the same inode number.
     // Any file or directory is required to name an inode number of 1 or higher.
     inode_t    inode;
+    // Link count (how many names reference this inode).
+    // When 0 and after the last file object is closed, the file is deleted.
+    blksize_t  links;
     // Pointer to the VFS on which this file exists.
     vfs_t     *vfs;
     // Handle mutex for concurrency.
     mutex_t    mutex;
     // FS mounted in this directory, if any.
     vfs_t     *mounted_fs;
+    // Handle references the root directory of a mounted filesystem.
+    // Not to be confused with the mountpoint directory.
+    bool       is_vfs_root;
 };
 
 // VFS opened file handle.
@@ -81,8 +87,10 @@ struct vfs {
     void              *cookie;
     // Number of currently open files.
     atomic_int         n_open_fd;
-    // Roor directory file object.
+    // Root directory file object.
     vfs_file_obj_t    *root_dir_obj;
+    // File retured when opening .. at root.
+    vfs_file_obj_t    *root_parent_obj;
 };
 
 // Identify whether a block device contains a this filesystem.

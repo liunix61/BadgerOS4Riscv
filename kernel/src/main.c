@@ -3,6 +3,7 @@
 
 #include "assertions.h"
 #include "attributes.h"
+#include "blockdevice/blkdev_ram.h"
 #include "cpulocal.h"
 #include "filesystem.h"
 #include "housekeeping.h"
@@ -137,6 +138,9 @@ void syscall_sys_shutdown(bool is_reboot) {
 
 
 
+extern uint8_t      dummy_fs[];
+extern size_t const dummy_fs_len;
+
 // After basic runtime initialization, the booting CPU core continues here.
 // This finishes the initialization of all kernel systems, resources and services.
 // When finished, the non-booting CPUs will be started (method and entrypoints to be determined).
@@ -147,6 +151,43 @@ static void kernel_init() {
     memprotect_init();
     // Full hardware initialization.
     port_init();
+
+    // Test the FAT filesystem.
+    blkdev_t *media = blkdev_ram_create(&ec, dummy_fs, dummy_fs_len / 512, 512, false);
+    badge_err_assert_always(&ec);
+    logk(LOG_INFO, "Mounting FATTY");
+    fs_mount(&ec, NULL, media, -1, "/", 1, 0);
+    badge_err_assert_always(&ec);
+    logk(LOG_INFO, "yay");
+
+    // Create a new dir.
+    char const *dir_path = "/dirs";
+    fs_dir_create(&ec, -1, dir_path, cstr_length(dir_path));
+    badge_err_assert_always(&ec);
+
+    // Create a new file.
+    char const *path = "/dirs/funny.ok";
+    file_t      fd   = fs_open(&ec, -1, path, cstr_length(path), OFLAGS_CREATE | OFLAGS_READWRITE);
+    badge_err_assert_always(&ec);
+    char const *funny_data = "This is some funny test data written to the file.";
+    fs_write(&ec, fd, funny_data, cstr_length(funny_data));
+    badge_err_assert_always(&ec);
+    fs_close(&ec, fd);
+    badge_err_assert_always(&ec);
+
+    // Read the file again.
+    fd = fs_open(&ec, -1, path, cstr_length(path), OFLAGS_READONLY);
+    badge_err_assert_always(&ec);
+    char      buf[256];
+    fileoff_t readlen = fs_read(&ec, fd, buf, sizeof(buf));
+    badge_err_assert_always(&ec);
+    logk_hexdump_vaddr(LOG_INFO, "File contents:", buf, readlen, 0);
+
+    // Now delete the file.
+    fs_unlink(&ec, -1, path, cstr_length(path));
+    badge_err_assert_always(&ec);
+
+    while (1);
 
     // Temporary filesystem image.
     fs_mount(&ec, "ramfs", NULL, FILE_NONE, "/", 1, 0);

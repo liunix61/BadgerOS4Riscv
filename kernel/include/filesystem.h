@@ -82,7 +82,7 @@ typedef enum {
     // Symbolic link
     FILETYPE_LINK = 10,
     // Regular file
-    FILETYPE_REG  = 8,
+    FILETYPE_FILE = 8,
     // Block device
     FILETYPE_BLK  = 6,
     // Directory
@@ -220,7 +220,7 @@ void fs_symlink(
 );
 
 // Close a file opened by `fs_open`.
-// Only raises an error if `file` is an invalid file descriptor.
+// Only raises an error if `file` is an invalid file descriptor or an I/O error occurs.
 void      fs_close(badge_err_t *ec, file_t file);
 // Read bytes from a file.
 // Returns the amount of data successfully read.

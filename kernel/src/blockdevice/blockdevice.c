@@ -297,8 +297,12 @@ void blkdev_write(badge_err_t *ec, blkdev_t *dev, blksize_t block, uint8_t const
         return;
     }
 
-    uint8_t        *cache = dev->cache->block_cache;
-    blkdev_flags_t *flags = dev->cache->block_flags;
+    uint8_t        *cache;
+    blkdev_flags_t *flags;
+    if (dev->cache) {
+        cache = dev->cache->block_cache;
+        flags = dev->cache->block_flags;
+    }
 
     // Attempt to cache write operation.
     ptrdiff_t i = blkdev_alloc_cache(dev, block);
@@ -340,9 +344,12 @@ void blkdev_read(badge_err_t *ec, blkdev_t *dev, blksize_t block, uint8_t *readb
         return;
     }
 
-    uint8_t        *cache = dev->cache->block_cache;
-    blkdev_flags_t *flags = dev->cache->block_flags;
-
+    uint8_t        *cache;
+    blkdev_flags_t *flags;
+    if (dev->cache) {
+        cache = dev->cache->block_cache;
+        flags = dev->cache->block_flags;
+    }
     // Look for the entry in the cache.
     ptrdiff_t i = blkdev_alloc_cache(dev, block);
     if (i >= 0 && flags[i].present) {
@@ -381,6 +388,50 @@ void blkdev_read(badge_err_t *ec, blkdev_t *dev, blksize_t block, uint8_t *readb
     }
 }
 
+// Read bytes with absolute address.
+// This operation may be cached.
+void blkdev_read_bytes(badge_err_t *ec, blkdev_t *dev, blksize_t abspos, uint8_t *readbuf, size_t readbuf_len) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
+
+    if (abspos + readbuf_len < abspos || abspos + readbuf_len > dev->block_size * dev->blocks) {
+        badge_err_set(ec, ELOC_BLKDEV, ECAUSE_RANGE);
+        return;
+    }
+
+    while (readbuf_len) {
+        blksize_t subblock = abspos % dev->block_size;
+        blksize_t max      = dev->block_size - subblock < readbuf_len ? dev->block_size - subblock : readbuf_len;
+        blkdev_read_partial(ec, dev, abspos / dev->block_size, subblock, readbuf, max);
+        abspos      += max;
+        readbuf     += max;
+        readbuf_len -= max;
+    }
+}
+
+// Erase if necessary and write a bytes.
+// This is very likely to cause a read-modify-write operation.
+void blkdev_write_bytes(
+    badge_err_t *ec, blkdev_t *dev, blksize_t abspos, uint8_t const *writebuf, size_t writebuf_len
+) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
+
+    if (abspos + writebuf_len < abspos || abspos + writebuf_len > dev->block_size * dev->blocks) {
+        badge_err_set(ec, ELOC_BLKDEV, ECAUSE_RANGE);
+        return;
+    }
+
+    while (writebuf_len) {
+        blksize_t subblock = abspos % dev->block_size;
+        blksize_t max      = dev->block_size - subblock < writebuf_len ? dev->block_size - subblock : writebuf_len;
+        blkdev_write_partial(ec, dev, abspos / dev->block_size, subblock, writebuf, max);
+        abspos       += max;
+        writebuf     += max;
+        writebuf_len -= max;
+    }
+}
+
 // Partially write a block.
 // This is very likely to cause a read-modify-write operation.
 void blkdev_write_partial(
@@ -415,9 +466,17 @@ void blkdev_write_partial(
         return;
     }
 
-    uint8_t        *cache = dev->cache->block_cache;
-    blkdev_flags_t *flags = dev->cache->block_flags;
+    if (writebuf_len == dev->block_size) {
+        blkdev_write(ec, dev, block, writebuf);
+        return;
+    }
 
+    uint8_t        *cache;
+    blkdev_flags_t *flags;
+    if (dev->cache) {
+        cache = dev->cache->block_cache;
+        flags = dev->cache->block_flags;
+    }
     // Attempt to cache write operation.
     ptrdiff_t i = blkdev_alloc_cache(dev, block);
     if (i >= 0) {
@@ -469,8 +528,17 @@ void blkdev_read_partial(
         return;
     }
 
-    uint8_t        *cache = dev->cache->block_cache;
-    blkdev_flags_t *flags = dev->cache->block_flags;
+    if (readbuf_len == dev->block_size) {
+        blkdev_read(ec, dev, block, readbuf);
+        return;
+    }
+
+    uint8_t        *cache;
+    blkdev_flags_t *flags;
+    if (dev->cache) {
+        cache = dev->cache->block_cache;
+        flags = dev->cache->block_flags;
+    }
 
     // Look for the entry in the cache.
     ptrdiff_t i = blkdev_alloc_cache(dev, block);

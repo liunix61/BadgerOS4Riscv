@@ -29,15 +29,26 @@
         0xAA
 
     FAT12 and FAT16 have a fixed, preallocated root directory outside of the data clusers,
-    while FAT32 has a dynamic root directory size lives in the data clusters.
+    while FAT32 has a dynamic root directory size that lives in the data clusters.
 */
 
 
 
 /* ==== On-disk structures ==== */
 
+#define FAT_ATTR_READ_ONLY 0x01
+#define FAT_ATTR_HIDDEN    0x02
+#define FAT_ATTR_SYSTEM    0x04
+#define FAT_ATTR_VOLUME_ID 0x08
+#define FAT_ATTR_DIRECTORY 0x10
+#define FAT_ATTR_ARCHIVE   0x20
+#define FAT_ATTR_LONG_NAME (FAT_ATTR_READ_ONLY | FAT_ATTR_HIDDEN | FAT_ATTR_SYSTEM | FAT_ATTR_VOLUME_ID)
+
+#define FAT_ATTR2_LC_NAME 0x08
+#define FAT_ATTR2_LC_EXT  0x10
+
 // FAT BIOS parameter block.
-typedef struct PACKED {
+typedef struct PACKED LITTLE_ENDIAN {
     // Used for the x86 jump to bootloader.
     uint8_t  jumpboot[3];
     // OEM name, recommended is "MSWIN4.1".
@@ -75,7 +86,7 @@ typedef struct PACKED {
 static_assert(sizeof(fat_bpb_t) == 36);
 
 // FAT12/FAT16 filesystem header.
-typedef struct PACKED {
+typedef struct PACKED LITTLE_ENDIAN {
     // Drive number for floppy disks.
     uint8_t  drive_number;
     // Reserved; set to 0.
@@ -93,7 +104,7 @@ static_assert(sizeof(fat16_header_t) == 26);
 
 // FAT32 filesystem header.
 // Inserted before the FAT12/FAT16 filesystem header.
-typedef struct PACKED {
+typedef struct PACKED LITTLE_ENDIAN {
     // 32-bit sectors per FAT.
     uint32_t sectors_per_fat_32;
     // Extra filesystem flags; see `FAT32_EXTFLAG_*`.
@@ -111,29 +122,103 @@ typedef struct PACKED {
 } fat32_header_t;
 static_assert(sizeof(fat32_header_t) == 28);
 
+// FAT date format.
+typedef union PACKED LITTLE_ENDIAN {
+    struct {
+        // Day (1-31).
+        uint16_t day   : 5;
+        // Month (1-12).
+        uint16_t month : 4;
+        // Years since 1980.
+        uint16_t year  : 7;
+    };
+    uint16_t val;
+} fat_date_t;
+
+// FAT directory entry.
+typedef struct PACKED LITTLE_ENDIAN {
+    // Short filename in 8.3 format.
+    char       name[11];
+    // File attributes.
+    uint8_t    attr;
+    // Additional attributes.
+    uint8_t    attr2;
+    // Creation time in 0.1s increments.
+    uint8_t    ctime_tenth;
+    // Creation time in 2s increments.
+    uint16_t   ctime_2s;
+    // Creation date.
+    fat_date_t ctime;
+    // Last accessed date.
+    fat_date_t atime;
+    // High 16 bits of first cluster.
+    uint16_t   first_cluster_hi;
+    // Modification time in 2s increments.
+    uint16_t   mtime_2s;
+    // Modification date.
+    fat_date_t mtime;
+    // Low 16 bits of first cluster.
+    uint16_t   first_cluster_lo;
+    // File size in bytes.
+    uint32_t   size;
+} fat_dirent_t;
+static_assert(sizeof(fat_dirent_t) == 32);
+
 
 
 /* ==== In-memory structures ==== */
+
+// Which type of FAT is mounted right now.
+typedef enum {
+    FAT12,
+    FAT16,
+    FAT32,
+} fs_fat_type_t;
 
 // FAT filesystem opened file / directory handle.
 // This handle is shared between multiple holders of the same file.
 typedef struct {
     // Data clusters in which the file's content is stored.
-    blksize_t *clusters;
+    uint32_t       *clusters;
     // Number of allocated clusters.
-    size_t     clusters_len;
-} vfs_fat_file_t;
+    size_t          clusters_len, clusters_cap;
+    // Parent directory.
+    vfs_file_obj_t *parent;
+    // Position of dirent in parent dir.
+    uint32_t        dirent_no;
+} fs_fat_file_t;
 
 // Mounted FAT filesystem.
 typedef struct {
+    /* ==== Static filesystem information ====*/
+    // Which type of FAT is mounted right now.
+    fs_fat_type_t type;
     // Sector size in bytes.
-    blksize_t bytes_per_sector;
+    uint32_t      bytes_per_sector;
     // Cluster size in sectors.
-    blksize_t sectors_per_cluster;
+    uint32_t      sectors_per_cluster;
     // First data sector.
-    blksize_t data_sector;
+    uint32_t      data_sector;
     // First sector of the first FAT.
-    blksize_t fat_sector;
+    uint32_t      fat_sector;
+    // Total sectors per FAT.
+    uint32_t      sectors_per_fat;
     // Number of clusters excluding reserved values.
-    blksize_t cluster_count;
-} vfs_fat_t;
+    uint32_t      cluster_count;
+    // Root directory sector for FAT12 or FAT16.
+    uint32_t      legacy_root_sector;
+    // Root directory entry count for FAT12 or FAT16.
+    uint16_t      legacy_root_size;
+    // Root directory start cluster for FAT32.
+    uint32_t      fat32_root_cluster;
+    // Index of the currently active FAT.
+    uint8_t       active_fat;
+    // FAT entry mutex required for FAT12 specifically.
+    mutex_t       fat12_mutex;
+
+    /* ==== Dynamic information ==== */
+    // Bitmap of free clusters in the FAT.
+    size_t              *free_bitmap;
+    // Number of free clusters.
+    atomic_uint_fast32_t free_clusters;
+} fs_fat_t;

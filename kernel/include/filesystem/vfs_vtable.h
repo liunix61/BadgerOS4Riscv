@@ -13,17 +13,23 @@ typedef bool (*vfs_mount_t)(badge_err_t *ec, vfs_t *vfs);
 typedef void (*vfs_umount_t)(vfs_t *vfs);
 
 // Insert a new file into the given directory.
-// If `dir` is NULL, the root directory is used.
 // If the file already exists, does nothing.
 typedef void (*vfs_create_file_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Insert a new directory into the given directory.
-// If `dir` is NULL, the root directory is used.
 // If the file already exists, does nothing.
 typedef void (*vfs_create_dir_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Unlink a file from the given directory.
-// If `dir` is NULL, the root directory is used.
+// If the file is currently open, the file object for it is provided in `file`.
 // If this is the last reference to an inode, the inode is deleted.
-typedef void (*vfs_unlink_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
+typedef void (*vfs_unlink_t)(
+    badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
+);
+// Remove a directory if it is empty.
+// If the directory is currently open, the file object for it is provided in `file`.
+// If this is the last reference to an inode, the inode is deleted.
+typedef void (*vfs_rmdir_t)(
+    badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
+);
 // Test for the existence of a file in the given directory.
 // If `dir` is NULL, the root directory is used.
 typedef bool (*vfs_exists_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
@@ -38,7 +44,7 @@ typedef bool (*vfs_dir_find_ent_t)(
 );
 
 // Stat a file object.
-typedef void (*vfs_stat_t)(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat);
+typedef void (*vfs_stat_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, stat_t *stat);
 
 // Open a file handle for the root directory.
 typedef void (*vfs_root_open_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);
@@ -75,6 +81,7 @@ typedef struct {
     vfs_create_file_t  create_file;
     vfs_create_dir_t   create_dir;
     vfs_unlink_t       unlink;
+    vfs_rmdir_t        rmdir;
     vfs_exists_t       exists;
     vfs_dir_read_t     dir_read;
     vfs_dir_find_ent_t dir_find_ent;

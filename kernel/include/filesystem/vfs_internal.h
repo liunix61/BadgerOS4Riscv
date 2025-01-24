@@ -19,6 +19,8 @@ void            vfs_dir_create(badge_err_t *ec, vfs_file_obj_t *dir, char const 
 // Unlink a file from the given directory.
 // If this is the last reference to an inode, the inode is deleted.
 void            vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
+// Remove a directory if it is empty.
+void            vfs_rmdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 
 // Read all entries from a directory.
 dirent_list_t vfs_dir_read(badge_err_t *ec, vfs_file_obj_t *dir);
@@ -54,7 +56,7 @@ void vfs_symlink(
 vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig);
 // Close a file opened by `vfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-void            vfs_file_drop_ref(vfs_file_obj_t *file);
+void            vfs_file_drop_ref(badge_err_t *ec, vfs_file_obj_t *file);
 // Read bytes from a file.
 // The entire read succeeds or the entire read fails, never partial read.
 void vfs_file_read(badge_err_t *ec, vfs_file_obj_t *file, fileoff_t offset, uint8_t *readbuf, fileoff_t readlen);

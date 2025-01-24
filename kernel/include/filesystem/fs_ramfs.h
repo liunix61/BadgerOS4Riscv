@@ -42,7 +42,7 @@ bool fs_ramfs_dir_find_ent(
 );
 
 // Stat a file object.
-void fs_ramfs_stat(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat);
+void fs_ramfs_stat(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, stat_t *stat);
 
 // Open a file handle for the root directory.
 void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);

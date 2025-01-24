@@ -140,7 +140,42 @@ void vfs_dir_create(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size
 // Unlink a file from the given directory.
 // If this is the last reference to an inode, the inode is deleted.
 void vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
-    dir->vfs->vtable.unlink(ec, dir->vfs, dir, name, name_len);
+    if (dir->is_vfs_root) {
+        dir = dir->mounted_fs;
+    }
+
+    // Find the dirent.
+    dirent_t ent;
+    if (!dir->vfs->vtable.dir_find_ent(ec, dir->vfs, dir, &ent, name, name_len)) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
+        return;
+    }
+    if (ent.is_dir) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_DIR);
+        return;
+    }
+
+    dir->vfs->vtable.unlink(ec, dir->vfs, dir, name, name_len, open_existing(dir->vfs, ent.inode));
+}
+
+// Remove a directory if it is empty.
+void vfs_rmdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    if (dir->is_vfs_root) {
+        dir = dir->mounted_fs;
+    }
+
+    // Find the dirent.
+    dirent_t ent;
+    if (!dir->vfs->vtable.dir_find_ent(ec, dir->vfs, dir, &ent, name, name_len)) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
+        return;
+    }
+    if (!ent.is_dir) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return;
+    }
+
+    dir->vfs->vtable.rmdir(ec, dir->vfs, dir, name, name_len, open_existing(dir->vfs, ent.inode));
 }
 
 
@@ -161,8 +196,14 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     badge_err_t ec0 = {0};
     ec              = ec ?: &ec0;
 
-    // If an FS is mounted here, redirect to its root directory.
-    if (dir->mounted_fs) {
+    // Current dir entry needs no lookup.
+    if (name_len == 1 && name[0] == '.') {
+        badge_err_set_ok(ec);
+        return vfs_file_dup(dir);
+    }
+
+    // If an FS is mounted here, redirect to its root directory, unless the filename is `..`.
+    if (dir->mounted_fs && !(name_len == 2 && name[0] == '.' && name[1] == '.')) {
         dir = dir->mounted_fs->root_dir_obj;
     }
 
@@ -171,6 +212,11 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     if (!dir->vfs->vtable.dir_find_ent(ec, dir->vfs, dir, &ent, name, name_len)) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
         return NULL;
+    }
+
+    // Redirect root directory references to the mountpoint.
+    if (ent.inode == dir->vfs->inode_root) {
+        return vfs_file_dup(dir->vfs->root_parent_obj);
     }
 
     mutex_acquire(NULL, &objs_mtx, TIMESTAMP_US_MAX);
@@ -188,7 +234,9 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     if (!fobj) {
         goto err0;
     }
-    fobj->cookie = calloc(1, dir->vfs->driver->file_cookie_size);
+    fobj->cookie   = calloc(1, dir->vfs->driver->file_cookie_size);
+    fobj->vfs      = dir->vfs;
+    fobj->refcount = 1;
     if (!fobj->cookie) {
         goto err1;
     }
@@ -222,7 +270,7 @@ vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig) {
 
 // Close a file opened by `vfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-void vfs_file_drop_ref(vfs_file_obj_t *file) {
+void vfs_file_drop_ref(badge_err_t *ec, vfs_file_obj_t *file) {
     if (atomic_fetch_sub(&file->refcount, 1) == 1) {
         file->vfs->vtable.file_close(file->vfs, file);
         free(file->cookie);

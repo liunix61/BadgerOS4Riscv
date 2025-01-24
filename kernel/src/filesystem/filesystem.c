@@ -70,9 +70,11 @@ static walk_t walk(badge_err_t *ec, vfs_file_obj_t *dirfd, char const *path, siz
         if (path[0] == '/' && (!dirfd || dirfd->type != FILETYPE_DIR)) {
             // Not a directory.
             if (out.parent) {
-                vfs_file_drop_ref(out.parent);
+                vfs_file_drop_ref(ec, out.parent);
                 out.parent = NULL;
-                badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+                if (badge_err_is_ok(ec)) {
+                    badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+                }
             }
             return out;
         }
@@ -99,7 +101,11 @@ static walk_t walk(badge_err_t *ec, vfs_file_obj_t *dirfd, char const *path, siz
 
         // Open next file along path.
         if (out.parent) {
-            vfs_file_drop_ref(out.parent);
+            vfs_file_drop_ref(ec, out.parent);
+            if (!badge_err_is_ok(ec)) {
+                vfs_file_drop_ref(NULL, dirfd);
+                return;
+            }
         }
         out.parent = dirfd;
         out.file   = vfs_file_open(ec, dirfd, path, delim);
@@ -120,12 +126,14 @@ static void fd_take_ref(vfs_file_desc_t *fd) {
 }
 
 // Decrease the FD refcount.
-static void fd_drop_ref(vfs_file_desc_t *fd) {
+static void fd_drop_ref(badge_err_t *ec, vfs_file_desc_t *fd) {
     int prev = atomic_fetch_sub(&fd->refcount, 1);
     if (prev == 1) {
         // All refs dropped; close FD.
-        vfs_file_drop_ref(fd->obj);
+        vfs_file_drop_ref(ec, fd->obj);
         free(fd);
+    } else {
+        badge_err_set_ok(ec);
     }
 }
 
@@ -151,9 +159,13 @@ static vfs_file_desc_t *get_fd_ptr(badge_err_t *ec, file_t fileno) {
 static vfs_file_desc_t *get_file_fd_ptr(badge_err_t *ec, file_t fileno) {
     vfs_file_desc_t *fd = get_fd_ptr(ec, fileno);
     if (fd && fd->obj->type == FILETYPE_DIR) {
-        fd_drop_ref(fd);
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_DIR);
+        fd_drop_ref(ec, fd);
+        if (badge_err_is_ok(ec)) {
+            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_DIR);
+        }
         return NULL;
+    } else {
+        badge_err_set_ok(ec);
     }
     return fd;
 }
@@ -163,9 +175,13 @@ static vfs_file_desc_t *get_file_fd_ptr(badge_err_t *ec, file_t fileno) {
 static vfs_file_desc_t *get_dir_fd_ptr(badge_err_t *ec, file_t fileno) {
     vfs_file_desc_t *fd = get_fd_ptr(ec, fileno);
     if (fd && fd->obj->type != FILETYPE_DIR) {
-        fd_drop_ref(fd);
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        fd_drop_ref(ec, fd);
+        if (badge_err_is_ok(ec)) {
+            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        }
         return NULL;
+    } else {
+        badge_err_is_ok(ec);
     }
     return fd;
 }
@@ -220,6 +236,20 @@ static bool mount_at(badge_err_t *ec, vfs_t *vfs, blkdev_t *media, char const *t
 void fs_mount(
     badge_err_t *ec, char const *type, blkdev_t *media, file_t at, char const *path, size_t path_len, mountflags_t flags
 ) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
+
+    if (!type) {
+        type = fs_detect(ec, media);
+        if (!type) {
+            logk(LOG_ERROR, "Cannot determine FS type");
+            if (badge_err_is_ok(ec)) {
+                badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
+            }
+            return;
+        }
+    }
+
     // Assert the first mounted FS to be the root.
     if (!root_mounted) {
         if (at != FILE_NONE || path_len != 1 || path[0] != '/') {
@@ -233,17 +263,6 @@ void fs_mount(
         return;
     }
 
-    if (!type) {
-        type = fs_detect(ec, media);
-        if (!type) {
-            logk(LOG_ERROR, "Cannot determine FS type");
-            if (badge_err_is_ok(ec)) {
-                badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
-            }
-            return;
-        }
-    }
-
     // Get handle for relative directory.
     vfs_file_obj_t *at_obj;
     if (at == FILE_NONE) {
@@ -255,13 +274,27 @@ void fs_mount(
             return;
         }
         at_obj = vfs_file_dup(at_fd->obj);
-        fd_drop_ref(at_fd);
+        fd_drop_ref(ec, at_fd);
+        if (!badge_err_is_ok(ec)) {
+            vfs_file_drop_ref(NULL, at_obj);
+            return;
+        }
     }
 
     // Mount the filesystem.
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
-    vfs_file_drop_ref(at_obj);
+    vfs_file_drop_ref(ec, at_obj);
+    if (!badge_err_is_ok(ec)) {
+        if (res.file) {
+            vfs_file_drop_ref(NULL, res.file);
+        }
+        if (res.parent) {
+            vfs_file_drop_ref(NULL, res.parent);
+        }
+        mutex_release(NULL, &dirs_mtx);
+        return;
+    }
     if (!res.file) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
     } else {
@@ -275,10 +308,10 @@ void fs_mount(
         } else {
             badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
         }
-        vfs_file_drop_ref(res.file);
+        vfs_file_drop_ref(ec, res.file);
     }
     if (res.parent) {
-        vfs_file_drop_ref(res.parent);
+        vfs_file_drop_ref(badge_err_is_ok(ec) ? ec : NULL, res.parent);
     }
     mutex_release(NULL, &dirs_mtx);
 }
@@ -293,7 +326,7 @@ void fs_umount(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
 // Returns `NULL` on error or if the filesystem is unknown.
 char const *fs_detect(badge_err_t *ec, blkdev_t *media) {
     for (fs_driver_t *driver = __start_fsdrivers; driver != __stop_fsdrivers; driver++) {
-        if (driver->detect(ec, media)) {
+        if (driver->detect && driver->detect(ec, media)) {
             return driver->id;
         }
     }
@@ -311,6 +344,9 @@ bool fs_is_canonical_path(char const *path, size_t path_len);
 // Create a new directory relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
 void fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
+
     if (!root_mounted) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
         logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
@@ -328,20 +364,33 @@ void fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len
             return;
         }
         at_obj = vfs_file_dup(at_fd->obj);
-        fd_drop_ref(at_fd);
+        fd_drop_ref(ec, at_fd);
+        if (!badge_err_is_ok(ec)) {
+            return;
+        }
     }
 
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
-    vfs_file_drop_ref(at_obj);
+    vfs_file_drop_ref(ec, at_obj);
+    if (!badge_err_is_ok(ec)) {
+        if (res.file) {
+            vfs_file_drop_ref(NULL, res.file);
+        }
+        if (res.parent) {
+            vfs_file_drop_ref(NULL, res.parent);
+        }
+        mutex_release(NULL, &dirs_mtx);
+        return;
+    }
     if (res.file) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
-        vfs_file_drop_ref(res.file);
+        vfs_file_drop_ref(ec, res.file);
     } else if (res.parent) {
         vfs_dir_create(ec, res.parent, res.filename, res.filename_len);
     }
     if (res.parent) {
-        vfs_file_drop_ref(res.parent);
+        vfs_file_drop_ref(badge_err_is_ok(ec) ? ec : NULL, res.parent);
     } else {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
     }
@@ -422,7 +471,12 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
             return FILE_NONE;
         }
         at_obj = vfs_file_dup(at_fd->obj);
-        fd_drop_ref(at_fd);
+        // TODO: finish adding error handling here.
+        fd_drop_ref(ec, at_fd);
+        if (!badge_err_is_ok(ec)) {
+            vfs_file_drop_ref(NULL, at_obj);
+            return FILE_NONE;
+        }
     }
 
     // Lock dir modifications.
@@ -434,7 +488,7 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
 
     // Walk the filesystem.
     walk_t res = walk(ec, at_obj, path, path_len, false);
-    vfs_file_drop_ref(at_obj);
+    vfs_file_drop_ref(ec, at_obj);
     if (!res.file && res.parent && (oflags & OFLAGS_CREATE)) {
         // Create file if OFLAGS_CREATE is set.
         res.file = vfs_file_create(ec, res.parent, res.filename, res.filename_len);
@@ -452,7 +506,7 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
     }
 
     if (res.parent) {
-        vfs_file_drop_ref(res.parent);
+        vfs_file_drop_ref(ec, res.parent);
     }
 
     if (!res.file) {
@@ -473,7 +527,7 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
     // Insert handle into files array.
     if (!array_lencap_sorted_insert(&files, sizeof(void *), &files_len, &files_cap, &fd, vfs_file_desc_id_cmp)) {
         mutex_release(NULL, &files_mtx);
-        vfs_file_drop_ref(fd->obj);
+        vfs_file_drop_ref(ec, fd->obj);
         free(fd);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
         return FILE_NONE;
@@ -506,14 +560,14 @@ void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
             return;
         }
         at_obj = vfs_file_dup(at_fd->obj);
-        fd_drop_ref(at_fd);
+        fd_drop_ref(ec, at_fd);
     }
 
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t res = walk(ec, at_obj, path, path_len, false);
-    vfs_file_drop_ref(at_obj);
+    vfs_file_drop_ref(ec, at_obj);
 
     if (res.file) {
         vfs_unlink(ec, res.parent, res.filename, res.filename_len);
@@ -525,10 +579,10 @@ void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
 
     // Clean up.
     if (res.file) {
-        vfs_file_drop_ref(res.file);
+        vfs_file_drop_ref(ec, res.file);
     }
     if (res.parent) {
-        vfs_file_drop_ref(res.parent);
+        vfs_file_drop_ref(ec, res.parent);
     }
 }
 
@@ -561,7 +615,7 @@ void fs_link(
             return;
         }
         new_at_obj = vfs_file_dup(new_at_fd->obj);
-        fd_drop_ref(new_at_fd);
+        fd_drop_ref(ec, new_at_fd);
     }
 
     vfs_file_obj_t *old_at_obj;
@@ -570,21 +624,21 @@ void fs_link(
     } else {
         vfs_file_desc_t *old_at_fd = get_dir_fd_ptr(ec, old_at);
         if (!old_at_fd) {
-            vfs_file_drop_ref(new_at_obj);
+            vfs_file_drop_ref(ec, new_at_obj);
             badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
             return;
         }
         old_at_obj = vfs_file_dup(old_at_fd->obj);
-        fd_drop_ref(old_at_fd);
+        fd_drop_ref(ec, old_at_fd);
     }
 
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t old_res = walk(ec, old_at_obj, old_path, old_path_len, false);
-    vfs_file_drop_ref(old_at_obj);
+    vfs_file_drop_ref(ec, old_at_obj);
     walk_t new_res = walk(ec, new_at_obj, new_path, new_path_len, false);
-    vfs_file_drop_ref(new_at_obj);
+    vfs_file_drop_ref(ec, new_at_obj);
 
     // Create hardlink.
     if (new_res.file) {
@@ -599,16 +653,16 @@ void fs_link(
 
     // Clean up.
     if (old_res.file) {
-        vfs_file_drop_ref(old_res.file);
+        vfs_file_drop_ref(ec, old_res.file);
     }
     if (old_res.parent) {
-        vfs_file_drop_ref(old_res.parent);
+        vfs_file_drop_ref(ec, old_res.parent);
     }
     if (new_res.file) {
-        vfs_file_drop_ref(new_res.file);
+        vfs_file_drop_ref(ec, new_res.file);
     }
     if (new_res.parent) {
-        vfs_file_drop_ref(new_res.parent);
+        vfs_file_drop_ref(ec, new_res.parent);
     }
 }
 
@@ -640,14 +694,14 @@ void fs_symlink(
             return;
         }
         link_at_obj = vfs_file_dup(at_fd->obj);
-        fd_drop_ref(at_fd);
+        fd_drop_ref(ec, at_fd);
     }
 
     mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t res = walk(ec, link_at_obj, link_path, link_path_len, false);
-    vfs_file_drop_ref(link_at_obj);
+    vfs_file_drop_ref(ec, link_at_obj);
 
     // Create symlink.
     if (res.file) {
@@ -660,10 +714,10 @@ void fs_symlink(
 
     // Clean up.
     if (res.file) {
-        vfs_file_drop_ref(res.file);
+        vfs_file_drop_ref(ec, res.file);
     }
     if (res.parent) {
-        vfs_file_drop_ref(res.parent);
+        vfs_file_drop_ref(ec, res.parent);
     }
 }
 
@@ -679,7 +733,7 @@ void fs_close(badge_err_t *ec, file_t file) {
         vfs_file_desc_t *fd = files[res.index];
         array_lencap_remove(&files, sizeof(void *), &files_len, &files_cap, NULL, res.index);
         mutex_release(NULL, &files_mtx);
-        fd_drop_ref(fd);
+        fd_drop_ref(ec, fd);
         badge_err_set_ok(ec);
     } else {
         mutex_release(NULL, &files_mtx);
@@ -696,7 +750,7 @@ fileoff_t fs_read(badge_err_t *ec, file_t file, void *readbuf, fileoff_t readlen
     }
 
     if (!fd->read) {
-        fd_drop_ref(fd);
+        fd_drop_ref(ec, fd);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PERM);
         return -1;
     }
@@ -715,7 +769,7 @@ fileoff_t fs_read(badge_err_t *ec, file_t file, void *readbuf, fileoff_t readlen
     }
     mutex_release_shared(NULL, &fd->obj->mutex);
 
-    fd_drop_ref(fd);
+    fd_drop_ref(ec, fd);
     return readlen;
 }
 
@@ -732,7 +786,7 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
     }
 
     if (!fd->write) {
-        fd_drop_ref(fd);
+        fd_drop_ref(ec, fd);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PERM);
         return -1;
     }
@@ -801,7 +855,7 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
         }
     }
 
-    fd_drop_ref(fd);
+    fd_drop_ref(ec, fd);
     return writelen;
 }
 
@@ -817,7 +871,7 @@ fileoff_t fs_tell(badge_err_t *ec, file_t file) {
         tmp = fd->obj->size;
     }
     mutex_release_shared(NULL, &fd->obj->mutex);
-    fd_drop_ref(fd);
+    fd_drop_ref(ec, fd);
     return tmp;
 }
 
@@ -841,7 +895,7 @@ fileoff_t fs_seek(badge_err_t *ec, file_t file, fileoff_t off, fs_seek_t seekmod
     }
     fd->offset = off;
     mutex_release_shared(NULL, &fd->obj->mutex);
-    fd_drop_ref(fd);
+    fd_drop_ref(ec, fd);
     return off;
 }
 
@@ -857,6 +911,6 @@ void fs_flush(badge_err_t *ec, file_t file) {
         mutex_acquire(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
         vfs_file_flush(ec, fd->obj);
         mutex_release(NULL, &fd->obj->mutex);
-        fd_drop_ref(fd);
+        fd_drop_ref(ec, fd);
     }
 }

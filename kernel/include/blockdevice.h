@@ -46,6 +46,12 @@ void blkdev_erase(badge_err_t *ec, blkdev_t *dev, blksize_t block);
 // Erase if necessary and write a block.
 // This operation may be cached and therefor delayed.
 void blkdev_write(badge_err_t *ec, blkdev_t *dev, blksize_t block, uint8_t const *writebuf);
+// Read bytes with absolute address.
+// This operation may be cached.
+void blkdev_read_bytes(badge_err_t *ec, blkdev_t *dev, blksize_t abspos, uint8_t *readbuf, size_t readbuf_len);
+// Erase if necessary and write a bytes.
+// This is very likely to cause a read-modify-write operation.
+void blkdev_write_bytes(badge_err_t *ec, blkdev_t *dev, blksize_t abspos, uint8_t const *writebuf, size_t writebuf_len);
 // Read a block.
 // This operation may be cached.
 void blkdev_read(badge_err_t *ec, blkdev_t *dev, blksize_t block, uint8_t *readbuf);
