@@ -61,7 +61,7 @@ STRUCT_FIELD_PTR(isr_ctx_t, mpu_ctx_t, mpu_ctx)
 STRUCT_FIELD_PTR(isr_ctx_t, void, frameptr)
 // Registers storage.
 // The trap/interrupt handler will save registers to here.
-STRUCT_FIELD_STRUCT(isr_ctx_t, cpu_regs_t, regs, 0)
+STRUCT_FIELD_STRUCT(isr_ctx_t, cpu_regs_t, regs, 176) // Size is 172 but align makes it 176
 // Pointer to next isr_ctx_t to switch to.
 // If nonnull, the trap/interrupt handler will context switch to this new context before exiting.
 STRUCT_FIELD_PTR(isr_ctx_t, isr_ctx_t, ctxswitch)
@@ -75,8 +75,6 @@ STRUCT_FIELD_STRUCT(isr_ctx_t, isr_noexc_cb_t, noexc_cb, 8)
 STRUCT_FIELD_PTR(isr_ctx_t, void, noexc_cookie)
 // Pointer to CPU-local struct.
 STRUCT_FIELD_PTR(isr_ctx_t, cpulocal_t, cpulocal)
-// Pointer to stack to use for user exceptions.
-STRUCT_FIELD_QWORD(isr_ctx_t, user_isr_stack)
 STRUCT_END(isr_ctx_t)
 
 // `isr_ctx_t` flag: Is a kernel thread.
@@ -114,7 +112,7 @@ static inline isr_ctx_t *isr_ctx_swap(isr_ctx_t *kctx) {
     msr_write(MSR_GSBASE, (uint64_t)kctx);
     asm volatile("mov [gs:%1], %0" ::"r"(old->ctxswitch), "i"((size_t)offsetof(isr_ctx_t, ctxswitch)) : "memory");
     asm volatile("mov [gs:%1], %0" ::"r"(old->cpulocal), "i"((size_t)offsetof(isr_ctx_t, cpulocal)) : "memory");
-    return NULL;
+    return old;
 }
 // Print a register dump given isr_ctx_t.
 void isr_ctx_dump(isr_ctx_t const *ctx);

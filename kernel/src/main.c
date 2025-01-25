@@ -85,6 +85,7 @@ void basic_runtime_init() {
 
     // Start the scheduler and enter the next phase in the kernel's lifetime.
     sched_exec();
+    assert_unreachable();
 }
 
 

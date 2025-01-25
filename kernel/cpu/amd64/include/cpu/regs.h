@@ -11,6 +11,17 @@
 
 
 
+// Access control (rings 0-2) / alignment check (ring 3) flag.
+#define RFLAGS_AC        (1 << 18)
+// Interrupt enable flag.
+#define RFLAGS_IF        (1 << 9)
+// I/O permission level base bit.
+#define RFLAGS_IOPL_BASE 12
+// I/O permission level mask.
+#define RFLAGS_IOPL_MASK (3 << 12)
+
+
+
 #ifdef __ASSEMBLER__
 
 #define STRUCT_BEGIN(structname) .equ structname##_size, 0
@@ -36,7 +47,6 @@
 
 #endif
 
-
 // AMD64 register file copy.
 STRUCT_BEGIN(cpu_regs_t)
 STRUCT_FIELD_QWORD(cpu_regs_t, rax)
@@ -56,11 +66,12 @@ STRUCT_FIELD_QWORD(cpu_regs_t, r13)
 STRUCT_FIELD_QWORD(cpu_regs_t, r14)
 STRUCT_FIELD_QWORD(cpu_regs_t, r15)
 STRUCT_FIELD_QWORD(cpu_regs_t, rip)
+STRUCT_FIELD_QWORD(cpu_regs_t, fsbase)
 STRUCT_FIELD_QWORD(cpu_regs_t, gsbase)
-STRUCT_FIELD_DWORD(cpu_regs_t, rflags)
+STRUCT_FIELD_QWORD(cpu_regs_t, rflags)
 STRUCT_FIELD_WORD(cpu_regs_t, cs)
-STRUCT_FIELD_WORD(cpu_regs_t, ds)
 STRUCT_FIELD_WORD(cpu_regs_t, ss)
+STRUCT_FIELD_WORD(cpu_regs_t, ds)
 STRUCT_FIELD_WORD(cpu_regs_t, es)
 STRUCT_FIELD_WORD(cpu_regs_t, fs)
 STRUCT_FIELD_WORD(cpu_regs_t, gs)

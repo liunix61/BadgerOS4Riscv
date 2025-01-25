@@ -76,6 +76,10 @@ extern size_t mmu_half_size;
 extern size_t mmu_hhdm_size;
 // Number of page table levels.
 extern int    mmu_levels;
+// SMAP is supported.
+extern bool   smap_support;
+// Process ID bits are supported.
+extern bool   pcid_support;
 // Virtual page number offset used for HHDM.
 #define mmu_hhdm_vpn   (mmu_hhdm_vaddr / MMU_PAGE_SIZE)
 // Virtual page number of the higher half.
@@ -157,11 +161,15 @@ static inline size_t mmu_pte_get_ppn(mmu_pte_t pte, int level) {
 
 // Enable supervisor access to user memory.
 static inline void mmu_enable_sum() {
-    // TODO.
+    if (smap_support) {
+        asm volatile("clac" ::: "memory");
+    }
 }
 // Disable supervisor access to user memory.
 static inline void mmu_disable_sum() {
-    // TODO.
+    if (smap_support) {
+        asm volatile("stac" ::: "memory");
+    }
 }
 
 

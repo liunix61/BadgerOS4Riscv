@@ -9,6 +9,51 @@
 
 
 
+// Division Error
+#define X86_EXC_DE 0x0
+// Debug
+#define X86_EXC_DB 0x1
+// Breakpoint
+#define X86_EXC_BP 0x3
+// Overflow
+#define X86_EXC_OF 0x4
+// Bound Range Exceeded
+#define X86_EXC_BR 0x5
+// Invalid Opcode
+#define X86_EXC_UD 0x6
+// Device Not Available
+#define X86_EXC_NM 0x7
+// Double Fault
+#define X86_EXC_DF 0x8
+// Invalid TSS
+#define X86_EXC_TS 0xA
+// Segment Not Present
+#define X86_EXC_NP 0xB
+// Stack-Segment Fault
+#define X86_EXC_SS 0xC
+// General Protection Fault
+#define X86_EXC_GP 0xD
+// Page Fault
+#define X86_EXC_PF 0xE
+// x87 Floating-Point Exception
+#define X86_EXC_MF 0x10
+// Alignment Check
+#define X86_EXC_AC 0x11
+// Machine Check
+#define X86_EXC_MC 0x12
+// SIMD Floating-Point Exception
+#define X86_EXC_XM 0x13
+// Virtualization Exception
+#define X86_EXC_VE 0x14
+// Control Protection Exception
+#define X86_EXC_CP 0x15
+// Hypervisor Injection Exception
+#define X86_EXC_HV 0x1C
+// VMM Communication Exception
+#define X86_EXC_VC 0x1D
+// Security Exception
+#define X86_EXC_SX 0x1E
+
 // AMD64 IDT entry.
 typedef __uint128_t x86_idtent_t;
 

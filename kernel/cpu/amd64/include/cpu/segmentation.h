@@ -3,6 +3,7 @@
 
 #pragma once
 
+#ifndef __ASSEMBLER__
 #include "attributes.h"
 
 #include <stdint.h>
@@ -27,9 +28,10 @@
 // GDT access: present.
 #define GDT_ACCESS_P        (1llu << 47)
 // Format base address for GDT.
-#define GDT_BASE(value)     ((((value) << 16) & 0x000000ffffff0000) | (((value) << 32) | 0xff00000000000000))
+#define GDT_BASE(value)     ((((value) << 16) & 0x000000ffffff0000) | (((value) << 32) & 0xff00000000000000))
 // Format limit for GDT.
 #define GDT_LIMIT(value)    ((value) & 0xffff)
+#endif
 
 // Format a segment value without address.
 #define FORMAT_SEGMENT(segno, use_local, privilege) (((segno) << 3) | ((use_local) << 2) | (privilege))
@@ -43,13 +45,7 @@
 // Segment number to use for user data.
 #define SEGNO_UDATA 4
 
-// Data format for TSS.
-typedef struct PACKED {
-    uint32_t : 32;
-    uint64_t rsp[3];
-    uint64_t : 64;
-    uint64_t ist[7];
-    uint64_t : 64;
-    uint16_t : 16;
-    uint16_t iopb;
-} amd64_tss_t;
+// Byte size of the TSS.
+#define TSS_SIZE  0x68
+// Offset of ring 0 stack in the TSS.
+#define TSS_STACK 0x04

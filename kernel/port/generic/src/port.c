@@ -78,13 +78,9 @@ uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
 // Memory map entry selected to be early alloc pool.
 static size_t early_alloc_index;
 
-// CPU0 local data.
-cpulocal_t port_cpu0_local;
-
 // Early hardware initialization.
 void port_early_init() {
     rawprint("\033[0m\033[2J");
-    isr_ctx_get()->cpulocal = &port_cpu0_local;
 
     // Verify needed requests have been answered.
     if (!mm_req.response) {

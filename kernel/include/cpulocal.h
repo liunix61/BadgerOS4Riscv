@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "cpu/arch_cpulocal.h"
 #include "scheduler/scheduler.h"
 #include "time_private.h"
 
@@ -24,6 +25,8 @@ typedef struct {
     sched_cpulocal_t *sched;
     // CPU-local timer data.
     time_cpulocal_t   time;
+    // Arch-specific CPU-local data.
+    arch_cpulocal_t   arch;
 } cpulocal_t;
 
 // Per-CPU CPU-local data.

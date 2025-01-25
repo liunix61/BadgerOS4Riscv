@@ -227,8 +227,17 @@ void sched_prepare_user_entry(sched_thread_t *thread, size_t entry_point, size_t
     asm("sw gp, %0" ::"m"(thread->kernel_isr_ctx.regs.gp));
 #endif
 
+    // This is duplicate info but the ISR assembly needs it to set up the stack.
+    thread->user_isr_ctx.user_isr_stack = thread->kernel_stack_top;
+
     // Initialize userland registers.
     mem_set(&thread->user_isr_ctx.regs, 0, sizeof(thread->user_isr_ctx.regs));
     thread->user_isr_ctx.regs.pc = entry_point;
     thread->user_isr_ctx.regs.a0 = arg;
+}
+
+// Run arch-specific task switch code before `isr_context_switch`.
+// Called after the scheduler decides what thread to switch to.
+void sched_arch_task_switch(sched_thread_t *next) {
+    (void)next;
 }

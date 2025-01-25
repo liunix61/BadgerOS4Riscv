@@ -51,6 +51,9 @@ void isr_ctx_dump(isr_ctx_t const *ctx) {
     DUMP_SEG("  ES  ", es);
     DUMP_SEG("  FS  ", fs);
     DUMP_SEG("  GS  ", gs);
+    rawprint("  FSBASE  0x");
+    rawprinthex(ctx->regs.fsbase, sizeof(size_t) * 2);
+    rawputc('\n');
     rawprint("  GSBASE  0x");
     rawprinthex(ctx->regs.gsbase, sizeof(size_t) * 2);
     rawputc('\n');

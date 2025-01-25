@@ -77,6 +77,9 @@ static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
     }
     info->last_preempt = now;
     time_set_next_task_switch(timeout);
+
+    // Run arch-specific pre-task-switch code.
+    sched_arch_task_switch(thread);
 }
 
 // Try to hand a thread off to another CPU.
@@ -477,7 +480,7 @@ void sched_exec() {
     // Start handed over threads or idle until one is handed over to this CPU.
     sched_request_switch_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }
 
 // Exit the scheduler and subsequenty shut down the CPU.
@@ -547,8 +550,6 @@ tid_t thread_new_user(
     thread->kernel_isr_ctx.thread = thread;
     thread->user_isr_ctx.thread   = thread;
     thread->user_isr_ctx.mpu_ctx  = &process->memmap.mpu_ctx;
-    thread->user_isr_ctx.user_isr_stack =
-        thread->kernel_stack_top; // This is duplicate info but the ISR assembly needs it to set up the stack.
     sched_prepare_user_entry(thread, user_entrypoint, user_arg);
 
     assert_dev_keep(mutex_acquire(NULL, &threads_mtx, TIMESTAMP_US_MAX));
@@ -812,7 +813,7 @@ void thread_exit(int code) {
     atomic_fetch_or(&thread->flags, THREAD_EXITING);
     sched_request_switch_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }
 
 // Wait for another thread to exit.

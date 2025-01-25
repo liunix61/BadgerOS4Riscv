@@ -3,6 +3,7 @@
 
 #include "cpu/regs.h"
     .global kernel_reg_dump_arr
+    .intel_syntax
 
 
 
@@ -18,4 +19,15 @@ kernel_cur_regs_dump:
     .global _isr_noexc_run_int
     .type _isr_noexc_run_int, %function
 _isr_noexc_run_int:
-    // TODO.
+    // Save all callee-save regs.
+    mov  [%rsi+cpu_regs_t_rbx], %rbx
+    mov  [%rsi+cpu_regs_t_rsp], %rsp
+    mov  [%rsi+cpu_regs_t_rbp], %rbp
+    mov  [%rsi+cpu_regs_t_r12], %r12
+    mov  [%rsi+cpu_regs_t_r13], %r13
+    mov  [%rsi+cpu_regs_t_r14], %r14
+    mov  [%rsi+cpu_regs_t_r15], %r15
+    mov  %rax, [%rsp]
+    mov  [%rsi+cpu_regs_t_rip], %rax
+    // Jump to implementation.
+    jmp  %rdx

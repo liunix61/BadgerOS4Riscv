@@ -106,7 +106,7 @@ void timer_set_freq(int timerno, frequency_hz_t freq) {
         case 1: clksrc = HP_SYS_CLKRST.peri_clk_ctrl20.reg_timergrp0_t1_src_sel; break;
         case 2: clksrc = HP_SYS_CLKRST.peri_clk_ctrl21.reg_timergrp1_t0_src_sel; break;
         case 3: clksrc = HP_SYS_CLKRST.peri_clk_ctrl21.reg_timergrp1_t1_src_sel; break;
-        default: __builtin_unreachable();
+        default: assert_unreachable();
     }
 #endif
 #ifdef CONFIG_TARGET_esp32c6
@@ -121,7 +121,7 @@ void timer_set_freq(int timerno, frequency_hz_t freq) {
         case 0: base_freq = XTAL_CLK_FREQ; break;
         case 1: base_freq = 80000000; break;
         case 2: base_freq = SOC_CLK_RC_FAST_FREQ_APPROX; break;
-        default: __builtin_unreachable();
+        default: assert_unreachable();
     }
 
     uint32_t divider = base_freq / freq;

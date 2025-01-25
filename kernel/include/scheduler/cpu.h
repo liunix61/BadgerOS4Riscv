@@ -39,3 +39,7 @@ void sched_prepare_kernel_entry(sched_thread_t *thread, void *entry_point, void 
 // Prepares a pair of contexts to be invoked as a userland thread.
 // Kernel-side in these threads is always started by an ISR and the entry point is given at that time.
 void sched_prepare_user_entry(sched_thread_t *thread, size_t entry_point, size_t arg);
+
+// Run arch-specific task switch code before `isr_context_switch`.
+// Called after the scheduler decides what thread to switch to.
+void sched_arch_task_switch(sched_thread_t *next);

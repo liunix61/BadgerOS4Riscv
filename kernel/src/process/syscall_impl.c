@@ -3,6 +3,7 @@
 
 #include "process/syscall_impl.h"
 
+#include "assertions.h"
 #include "badge_strings.h"
 #include "cpu/isr.h"
 #include "errno.h"
@@ -151,7 +152,7 @@ void syscall_proc_sigret() {
     irq_disable();
     sched_lower_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }
 
 // Get child process status update.

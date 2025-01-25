@@ -452,7 +452,7 @@ void fs_umount(badge_err_t *ec, char const *mountpoint) {
     switch (vfs_table[vfs_index].type) {
         // case FS_TYPE_FAT: vfs_fat_umount(&vfs_table[vfs_index]); break;
         case FS_TYPE_RAMFS: vfs_ramfs_umount(&vfs_table[vfs_index]); break;
-        default: __builtin_unreachable();
+        default: assert_unreachable();
     }
 
     // Release memory.

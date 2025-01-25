@@ -4,6 +4,7 @@
 #include "cpu/isr.h"
 #include "cpu/regs.h"
 #include "cpu/msr.h"
+#include "cpu/segmentation.h"
 #include "port/hardware.h"
     // .cfi_sections .debug_frame
     .intel_syntax
@@ -38,6 +39,7 @@ __amd64_irq_\index:
     # Macro for saving a single GPR.
     .macro save_reg name
     mov [%gs:isr_ctx_t_regs+cpu_regs_t_\name], %\name
+    // .cfi_offset \name, isr_ctx_t_regs+cpu_regs_t_\name
     .endm
 
 
@@ -45,6 +47,7 @@ __amd64_irq_\index:
     # Macro for restoring a single GPR.
     .macro restore_reg name
     mov %\name, [%gs:isr_ctx_t_regs+cpu_regs_t_\name]
+    // .cfi_restore \name
     .endm
 
 
@@ -99,6 +102,7 @@ __amd64_irq_\index:
     .text
     .global isr_context_switch
     .type isr_context_switch, %function
+    .cfi_startproc simple
 isr_context_switch:
     mov  %rax, [%gs:isr_ctx_t_ctxswitch]
     cmp  %rax, 0
@@ -116,44 +120,61 @@ isr_context_switch:
     # Save special regs.
     mov  %rdi, [%rsp]
     mov  [%gs:isr_ctx_t_regs+cpu_regs_t_rip], %rdi
-    mov  %rdi, %cs
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_cs], %rdi
     pushf
     pop  %rdi
     mov  [%gs:isr_ctx_t_regs+cpu_regs_t_rflags], %rdi
-    add  %rdi, %rsp, 8
+    mov  %rdi, %rsp
+    add  %rdi, 8
     mov  [%gs:isr_ctx_t_regs+cpu_regs_t_rsp], %rdi
-    mov  %rdi, %ss
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_ss], %rdi
+    
+    # Restore segment regs only on context switch; the kernel doesn't change them.
+    # This also clears FSBASE and GSBASE, which are set afterwards.
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_ds]
+    mov  %ds, %dx
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_es]
+    mov  %es, %dx
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_fs]
+    mov  %fs, %dx
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_gs]
+    mov  %gs, %dx
     
     # Write GSBASE to switch contexts.
-    jz   1f
-    shr  %rdx, %rax, 32
+    mov  %rdx, %rax
+    shr  %rdx, 32
     mov  %ecx, MSR_GSBASE
     wrmsr
     
     # Write KGSBASE, which is either the ISR context or the thread pointer.
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_gsbase]
-    shr  %rdx, %rax, 32
+    mov  %rdx, %rax
+    shr  %rdx, 32
     mov  %ecx, MSR_KGSBASE
+    wrmsr
+    
+    # Write FSBASE, which may also be used by user code.
+    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_fsbase]
+    mov  %rdx, %rax
+    shr  %rdx, 32
+    mov  %ecx, MSR_FSBASE
     wrmsr
     
     # Transfer special regs from ISR context to interrupt frame.
     sub  %rsp, 40
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rip]
     mov  [%rsp+amd64_irqframe_t_rip], %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_cs]
+    mov  %ax, [%gs:isr_ctx_t_regs+cpu_regs_t_cs]
     mov  [%rsp+amd64_irqframe_t_cs], %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rflags]
-    mov  [%rsp+amd64_irqframe_t_rflags], %rax
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rsp]
     mov  [%rsp+amd64_irqframe_t_rsp], %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_ss]
+    mov  %ax, [%gs:isr_ctx_t_regs+cpu_regs_t_ss]
     mov  [%rsp+amd64_irqframe_t_ss], %rax
+    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rflags]
+    mov  [%rsp+amd64_irqframe_t_rflags], %rax
     
     restore_gprs
     swapgs
     iretq
+    .cfi_endproc
     
 
 
@@ -163,46 +184,49 @@ isr_context_switch:
     # Trap and interrupt call handler.
     .text
     .type __trap_asm, %function
+    .cfi_startproc
+    // .cfi_signal_frame
 __amd64_irq:
+    // .cfi_return_column rip
     swapgs
-    
-    # Save segment registers and set them to 0.
-    push %rax
-    push %rbx
-    xor  %rbx, %rbx
-    
-    mov  %ax, %gs
-    mov  %gs, %rbx
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_gs], %ax
-    mov  %ds, %rbx
-    mov  %ax, %ds
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_ds], %ax
-    mov  %es, %rbx
-    mov  %ax, %es
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_es], %ax
-    mov  %fs, %rbx
-    mov  %ax, %fs
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_fs], %ax
-    
-    pop  %rbx
-    pop  %rax
     
     # Save general-purpose registers.
     save_gprs
     
+    # Move GSBASE into R15 so GDB understands all this.
+    mov  %ecx, MSR_GSBASE
+    rdmsr
+    mov  %rbp, %rax
+    shl  %rdx, 32
+    or   %rbp, %rdx
+    // .cfi_def_cfa %rbp, 0
+    
+    # Save segment regs.
+    mov  %ax, %ds
+    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_ds], %ax
+    mov  %ax, %es
+    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_es], %ax
+    mov  %ax, %fs
+    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_fs], %ax
+    mov  %ax, %gs
+    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_gs], %ax
+    
     # Transfer special regs from interrupt frame to ISR context.
     mov  %rax, [%rsp+16+amd64_irqframe_t_rip]
     mov  [%gs:isr_ctx_t_regs+cpu_regs_t_rip], %rax
+    // .cfi_offset %rip, isr_ctx_t_regs+cpu_regs_t_rip
     mov  %rax, [%rsp+16+amd64_irqframe_t_cs]
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_cs], %rax
+    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_cs], %ax
     mov  %rax, [%rsp+16+amd64_irqframe_t_rflags]
     mov  [%gs:isr_ctx_t_regs+cpu_regs_t_rflags], %rax
     mov  %rax, [%rsp+16+amd64_irqframe_t_rsp]
     mov  [%gs:isr_ctx_t_regs+cpu_regs_t_rsp], %rax
     mov  %rax, [%rsp+16+amd64_irqframe_t_ss]
-    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_ss], %rax
+    mov  [%gs:isr_ctx_t_regs+cpu_regs_t_ss], %ax
     
     # Call C handler.
+    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rbp]
+    mov  [%gs:isr_ctx_t_frameptr], %rax
     mov  %rdi, [%rsp+0]
     mov  %rsi, [%rsp+8]
     call amd64_trap_handler
@@ -210,50 +234,59 @@ __amd64_irq:
     # Check for context switch.
     mov  %rax, [%gs:isr_ctx_t_ctxswitch]
     cmp  %rax, 0
+    jz   1f
+    
+    # Restore segment regs only on context switch; the kernel doesn't change them.
+    # This also clears FSBASE and GSBASE, which are set afterwards.
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_ds]
+    mov  %ds, %dx
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_es]
+    mov  %es, %dx
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_fs]
+    mov  %fs, %dx
+    mov  %dx, [%rax+isr_ctx_t_regs+cpu_regs_t_gs]
+    mov  %gs, %dx
     
     # Write GSBASE to switch contexts.
-    jz   1f
-    shr  %rdx, %rax, 32
+    mov  %rdx, %rax
+    shr  %rdx, 32
     mov  %ecx, MSR_GSBASE
     wrmsr
     
     # Write KGSBASE, which is either the ISR context or the thread pointer.
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_gsbase]
-    shr  %rdx, %rax, 32
+    mov  %rdx, %rax
+    shr  %rdx, 32
     mov  %ecx, MSR_KGSBASE
+    wrmsr
+    
+    # Write FSBASE, which may also be used by user code.
+    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_fsbase]
+    mov  %rdx, %rax
+    shr  %rdx, 32
+    mov  %ecx, MSR_FSBASE
     wrmsr
 1:
     # Transfer special regs from ISR context to interrupt frame.
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rip]
     mov  [%rsp+16+amd64_irqframe_t_rip], %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_cs]
+    mov  %ax, [%gs:isr_ctx_t_regs+cpu_regs_t_cs]
     mov  [%rsp+16+amd64_irqframe_t_cs], %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rflags]
-    mov  [%rsp+16+amd64_irqframe_t_rflags], %rax
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rsp]
     mov  [%rsp+16+amd64_irqframe_t_rsp], %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_ss]
+    mov  %ax, [%gs:isr_ctx_t_regs+cpu_regs_t_ss]
     mov  [%rsp+16+amd64_irqframe_t_ss], %rax
+    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rflags]
+    mov  [%rsp+16+amd64_irqframe_t_rflags], %rax
     
     # Restore general-purpose registers.
     restore_gprs
-    
-    # Restore segment registers.
-    push %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_ds]
-    mov  %ds, %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_es]
-    mov  %es, %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_fs]
-    mov  %fs, %rax
-    mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_gs]
-    mov  %gs, %rax
-    pop  %rax
     
     # Return from interrupt.
     add %rsp, 16
     swapgs
     iretq
+    .cfi_endproc
 
 
 

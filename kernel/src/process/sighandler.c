@@ -3,6 +3,7 @@
 
 #include "process/sighandler.h"
 
+#include "assertions.h"
 #include "backtrace.h"
 #include "cpu/isr.h"
 #include "interrupt.h"
@@ -102,7 +103,7 @@ void proc_signal_handler() {
     irq_disable();
     sched_lower_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }
 
 // Raises a fault signal to the current thread.
@@ -159,7 +160,7 @@ static void trap_signal_handler(int signum, uint64_t cause) {
     irq_disable();
     sched_lower_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }
 
 // Raises a segmentation fault to the current thread.

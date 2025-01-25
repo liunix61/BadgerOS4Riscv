@@ -8,4 +8,8 @@ define reset
     c
 end
 
-reset
+mon system_reset
+maintenance flush register-cache
+thb basic_runtime_init
+b panic_poweroff
+c

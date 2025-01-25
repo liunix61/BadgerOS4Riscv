@@ -48,9 +48,10 @@ clean-image:
 
 .PHONY: qemu
 qemu: image
-# -smp 1 -m 4G -accel kvm -cpu host
+# -accel kvm -cpu host
 	$(QEMU) -s \
-		-d int -no-reboot -no-shutdown \
+	-d int -no-reboot -no-shutdown \
+		-smp 1 -m 4G -cpu max \
 		-device pcie-root-port,bus=pci.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-device virtio-scsi-pci,id=scsi \

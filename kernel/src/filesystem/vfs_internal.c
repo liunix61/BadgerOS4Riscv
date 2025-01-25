@@ -48,7 +48,7 @@ static atomic_int vfs_handle_no = 0;
     do {                                                                                                               \
         switch (type) {                                                                                                \
             case FS_TYPE_RAMFS: return vfs_ramfs_##method(__VA_ARGS__);                                                \
-            default: __builtin_unreachable();                                                                          \
+            default: assert_unreachable();                                                                             \
         }                                                                                                              \
     } while (0)
 
@@ -58,7 +58,7 @@ static atomic_int vfs_handle_no = 0;
         rettype vfs_impl_call_rv;                                                                                      \
         switch (type) {                                                                                                \
             case FS_TYPE_RAMFS: vfs_impl_call_rv = vfs_ramfs_##method(__VA_ARGS__); break;                             \
-            default: __builtin_unreachable();                                                                          \
+            default: assert_unreachable();                                                                             \
         }                                                                                                              \
         vfs_impl_call_rv;                                                                                              \
     })
@@ -68,7 +68,7 @@ static atomic_int vfs_handle_no = 0;
     do {                                                                                                               \
         switch (type) {                                                                                                \
             case FS_TYPE_RAMFS: vfs_ramfs_##method(__VA_ARGS__); break;                                                \
-            default: __builtin_unreachable();                                                                          \
+            default: assert_unreachable();                                                                             \
         }                                                                                                              \
     } while (0)
 

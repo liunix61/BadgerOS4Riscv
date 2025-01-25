@@ -3,6 +3,7 @@
 
 #include "cpu/isr.h"
 
+#include "assertions.h"
 #include "backtrace.h"
 #include "cpu/isr_ctx.h"
 #include "interrupt.h"
@@ -52,7 +53,7 @@ static void kill_proc_on_trap() {
     irq_disable();
     sched_lower_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }
 
 // Called from ASM on non-system call trap.
@@ -230,5 +231,5 @@ void syscall_return(long long value) {
     irq_disable();
     sched_lower_from_isr();
     isr_context_switch();
-    __builtin_unreachable();
+    assert_unreachable();
 }

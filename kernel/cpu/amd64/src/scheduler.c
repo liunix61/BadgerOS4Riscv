@@ -174,6 +174,7 @@ void sched_prepare_kernel_entry(sched_thread_t *thread, void *entry_point, void 
     thread->kernel_isr_ctx.regs.fs     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
     thread->kernel_isr_ctx.regs.gs     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
     thread->kernel_isr_ctx.regs.ss     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
+    thread->kernel_isr_ctx.regs.rflags = RFLAGS_AC;
 }
 
 // Prepares a pair of contexts to be invoked as a userland thread.
@@ -188,6 +189,7 @@ void sched_prepare_user_entry(sched_thread_t *thread, size_t entry_point, size_t
     thread->kernel_isr_ctx.regs.fs     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
     thread->kernel_isr_ctx.regs.gs     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
     thread->kernel_isr_ctx.regs.ss     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
+    thread->kernel_isr_ctx.regs.rflags = RFLAGS_AC;
     mem_set(&thread->user_isr_ctx.regs, 0, sizeof(thread->user_isr_ctx.regs));
     thread->user_isr_ctx.regs.gsbase = (size_t)&thread->user_isr_ctx;
     thread->user_isr_ctx.regs.rip    = entry_point;
@@ -198,4 +200,12 @@ void sched_prepare_user_entry(sched_thread_t *thread, size_t entry_point, size_t
     thread->user_isr_ctx.regs.fs     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
     thread->user_isr_ctx.regs.gs     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
     thread->user_isr_ctx.regs.ss     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.rflags = PRIV_USER << RFLAGS_IOPL_BASE;
+}
+
+// Run arch-specific task switch code before `isr_context_switch`.
+// Called after the scheduler decides what thread to switch to.
+void sched_arch_task_switch(sched_thread_t *next) {
+    size_t *ptr = (void *)(isr_ctx_get()->cpulocal->arch.tss + TSS_STACK);
+    *ptr        = next->kernel_stack_top;
 }

@@ -17,5 +17,6 @@ _start:
 	.intel_syntax
 	.cfi_undefined %rsp
 	.cfi_undefined %rbp
+	xor %rbp, %rbp
 	jmp basic_runtime_init
 	.cfi_endproc

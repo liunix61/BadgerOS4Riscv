@@ -7,11 +7,12 @@
 #include "cpu/msr.h"
 #include "cpu/priv_level.h"
 #include "cpu/segmentation.h"
+#include "cpulocal.h"
 
 
 
 // BSP global descriptor table.
-static uint64_t gdt[] = {
+static uint64_t bsp_gdt[] = {
     0,
     // Entry 1 is for kernel code.
     GDT_FLAG_L | GDT_ACCESS_E | GDT_ACCESS_S | GDT_ACCESS_RW | GDT_ACCESS_P,
@@ -38,8 +39,8 @@ void x86_setup_gdt() {
         uint16_t size;
         void    *addr;
     } gdtr = {
-        sizeof(gdt) - 1,
-        gdt,
+        sizeof(bsp_gdt) - 1,
+        bsp_gdt,
     };
     asm volatile("lgdt [%0]" ::"m"(gdtr));
 }
@@ -86,11 +87,21 @@ void x86_reload_segments() {
 
 
 
+// BSP TSS.
+static uint8_t bsp_tss[TSS_SIZE];
+
+// BSP CPU-local data.
+static cpulocal_t bsp_cpulocal = {
+    .arch.tss = &bsp_tss,
+};
+
 // Temporary interrupt context before scheduler.
 static isr_ctx_t tmp_ctx = {
-    .flags   = ISR_CTX_FLAG_KERNEL,
-    .regs.cs = FORMAT_SEGMENT(SEGNO_KCODE, 0, PRIV_KERNEL),
-    .regs.ss = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL),
+    .flags       = ISR_CTX_FLAG_KERNEL,
+    .regs.cs     = FORMAT_SEGMENT(SEGNO_KCODE, 0, PRIV_KERNEL),
+    .regs.ss     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL),
+    .regs.rflags = RFLAGS_AC,
+    .cpulocal    = &bsp_cpulocal,
 };
 
 // Array of IDT handler stubs.
@@ -104,6 +115,14 @@ void irq_init() {
     // Set up GDT for booting CPU.
     x86_setup_gdt();
     x86_reload_segments();
+
+    // Fill in the TSS address, which isn't possible at compile time.
+    size_t tss_addr  = (size_t)&bsp_tss;
+    bsp_gdt[6]      |= GDT_BASE(tss_addr);
+    bsp_gdt[7]      |= tss_addr >> 32;
+
+    // Load the TSS.
+    asm volatile("ltr %0" ::"r"((uint16_t)FORMAT_SEGMENT(6, 0, PRIV_KERNEL)));
 
     // Set up IDT handlers.
     for (size_t i = 0; i < idt_stubs_len; i++) {
