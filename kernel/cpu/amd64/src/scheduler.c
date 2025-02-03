@@ -43,12 +43,13 @@ void sched_raise_from_isr(sched_thread_t *thread, bool syscall, void *entry_poin
     }
 
     // Do time accounting.
-    timestamp_us_t    now         = time_us();
-    sched_cpulocal_t *info        = isr_ctx_get()->cpulocal->sched;
-    timestamp_us_t    used        = now - info->last_preempt;
-    thread->timeusage.cycle_time += used;
-    thread->timeusage.user_time  += used;
-    info->last_preempt            = now;
+    timestamp_us_t    now            = time_us();
+    sched_cpulocal_t *info           = isr_ctx_get()->cpulocal->sched;
+    timestamp_us_t    used           = now - info->last_preempt;
+    thread->timeusage.cycle_time    += used;
+    thread->timeusage.user_time     += used;
+    info->last_preempt               = now;
+    thread->kernel_isr_ctx.cpulocal  = isr_ctx_get()->cpulocal;
 
     // Set context switch target to kernel thread.
     isr_ctx_switch_set(&thread->kernel_isr_ctx);

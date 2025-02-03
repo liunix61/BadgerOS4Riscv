@@ -70,10 +70,11 @@ void riscv_trap_handler() {
     asm volatile("csrr %0, " CSR_STATUS_STR : "=r"(status));
 
     isr_ctx_t recurse_ctx;
-    recurse_ctx.mpu_ctx = NULL;
-    recurse_ctx.flags   = ISR_CTX_FLAG_IN_ISR | ISR_CTX_FLAG_KERNEL;
-    isr_ctx_t *kctx     = isr_ctx_swap(&recurse_ctx);
-    recurse_ctx.thread  = kctx->thread;
+    recurse_ctx.mpu_ctx  = NULL;
+    recurse_ctx.flags    = ISR_CTX_FLAG_IN_ISR | ISR_CTX_FLAG_KERNEL;
+    isr_ctx_t *kctx      = isr_ctx_swap(&recurse_ctx);
+    recurse_ctx.thread   = kctx->thread;
+    recurse_ctx.cpulocal = kctx->cpulocal;
 
     // Double fault detection.
     bool fault3 = kctx->flags & ISR_CTX_FLAG_2FAULT;

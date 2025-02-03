@@ -130,6 +130,8 @@ static inline mmu_pte_t mmu_pte_new(size_t ppn, int level) {
     mmu_pte_t pte = {0};
     pte.addr      = ppn;
     pte.p         = 1;
+    pte.us        = 1;
+    pte.rw        = 1;
     return pte;
 }
 // Creates a invalid PTE.

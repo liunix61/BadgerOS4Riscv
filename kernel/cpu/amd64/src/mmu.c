@@ -99,8 +99,11 @@ void memprotect_swap_from_isr() {
 
 // Swap in memory protections for a given context.
 void memprotect_swap(mpu_ctx_t *mpu) {
-    mpu     = mpu ?: &mpu_global_ctx;
-    bool ie = irq_disable();
-    // TODO.
+    mpu           = mpu ?: &mpu_global_ctx;
+    bool      ie  = irq_disable();
+    x86_cr3_t cr3 = {
+        .root_ppn = mpu->root_ppn,
+    };
+    asm("mov %%cr3, %0" ::"r"(cr3));
     irq_enable_if(ie);
 }

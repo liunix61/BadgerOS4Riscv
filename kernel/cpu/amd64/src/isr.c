@@ -71,10 +71,11 @@ static void kill_proc_on_trap() {
 // Called from ASM on non-system call trap.
 void amd64_trap_handler(size_t trapno, size_t error_code) {
     isr_ctx_t recurse_ctx;
-    recurse_ctx.mpu_ctx = NULL;
-    recurse_ctx.flags   = ISR_CTX_FLAG_IN_ISR | ISR_CTX_FLAG_KERNEL;
-    isr_ctx_t *kctx     = isr_ctx_swap(&recurse_ctx);
-    recurse_ctx.thread  = kctx->thread;
+    recurse_ctx.mpu_ctx  = NULL;
+    recurse_ctx.flags    = ISR_CTX_FLAG_IN_ISR | ISR_CTX_FLAG_KERNEL;
+    isr_ctx_t *kctx      = isr_ctx_swap(&recurse_ctx);
+    recurse_ctx.thread   = kctx->thread;
+    recurse_ctx.cpulocal = kctx->cpulocal;
 
     // Double fault detection.
     bool fault3 = kctx->flags & ISR_CTX_FLAG_2FAULT;
@@ -143,7 +144,6 @@ void amd64_trap_handler(size_t trapno, size_t error_code) {
             rawputc((kctx->flags & ISR_CTX_FLAG_KERNEL) ? '1' : '0');
             rawputc(')');
         }
-        rawputc('\n');
     }
 
     // Print current process.

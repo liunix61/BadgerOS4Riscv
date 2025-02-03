@@ -118,7 +118,7 @@ void irq_init() {
 
     // Fill in the TSS address, which isn't possible at compile time.
     size_t tss_addr  = (size_t)&bsp_tss;
-    bsp_gdt[6]      |= GDT_BASE(tss_addr);
+    bsp_gdt[6]      |= GDT_BASE(tss_addr) | GDT_LIMIT(TSS_SIZE - 1);
     bsp_gdt[7]      |= tss_addr >> 32;
 
     // Load the TSS.
