@@ -154,7 +154,7 @@ static inline uint32_t mmu_pte_get_flags(mmu_pte_t pte, int level) {
 }
 // Get physical page number encoded in PTE.
 static inline size_t mmu_pte_get_ppn(mmu_pte_t pte, int level) {
-    if (level) {
+    if (level && pte.pat_ps) {
         return pte.addr & ~1;
     } else {
         return pte.addr;
