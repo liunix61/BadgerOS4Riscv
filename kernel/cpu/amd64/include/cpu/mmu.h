@@ -164,13 +164,13 @@ static inline size_t mmu_pte_get_ppn(mmu_pte_t pte, int level) {
 // Enable supervisor access to user memory.
 static inline void mmu_enable_sum() {
     if (smap_support) {
-        asm volatile("clac" ::: "memory");
+        asm volatile("stac" ::: "memory");
     }
 }
 // Disable supervisor access to user memory.
 static inline void mmu_disable_sum() {
     if (smap_support) {
-        asm volatile("stac" ::: "memory");
+        asm volatile("clac" ::: "memory");
     }
 }
 

@@ -47,10 +47,20 @@ $(OUTPUT)/image.hdd: port/generic/limine.conf $(OUTPUT)/badger-os.elf
 clean-image:
 
 .PHONY: qemu
-qemu: image
-# -accel kvm -cpu host
-	$(QEMU) -s \
+qemu-debug: image
+	$(QEMU) -s -S \
 		-d int -no-reboot -no-shutdown \
+		-smp 1 -m 4G -cpu max \
+		-device pcie-root-port,bus=pci.0,id=pcisw0 \
+		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
+		-device virtio-scsi-pci,id=scsi \
+		-drive id=hd0,format=raw,file=$(OUTPUT)/image.hdd \
+		-debugcon stdio -display none \
+	| ../tools/address-filter.py -L -A $(CROSS_COMPILE)addr2line $(OUTPUT)/badger-os.elf
+
+.PHONY: qemu
+qemu: image
+	$(QEMU) -s \
 		-smp 1 -m 4G -cpu max \
 		-device pcie-root-port,bus=pci.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \

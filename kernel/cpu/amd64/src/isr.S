@@ -171,6 +171,9 @@ isr_context_switch:
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rflags]
     mov  [%rsp+amd64_irqframe_t_rflags], %rax
     
+    # Swap in memprotect context.
+    call memprotect_swap_from_isr
+    
     restore_gprs
     swapgs
     iretq
@@ -278,6 +281,9 @@ __amd64_irq:
     mov  [%rsp+16+amd64_irqframe_t_ss], %rax
     mov  %rax, [%gs:isr_ctx_t_regs+cpu_regs_t_rflags]
     mov  [%rsp+16+amd64_irqframe_t_rflags], %rax
+    
+    # Swap in memprotect context.
+    call memprotect_swap_from_isr
     
     # Restore general-purpose registers.
     restore_gprs

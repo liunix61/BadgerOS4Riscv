@@ -70,7 +70,7 @@ void mmu_early_init() {
 
     if (smap_support) {
         // The kernel shall, by default, not access user memory.
-        asm volatile("stac");
+        asm volatile("clac" ::: "memory");
     }
 }
 
@@ -105,5 +105,6 @@ void memprotect_swap(mpu_ctx_t *mpu) {
         .root_ppn = mpu->root_ppn,
     };
     asm("mov %%cr3, %0" ::"r"(cr3));
+    isr_ctx_get()->mpu_ctx = mpu;
     irq_enable_if(ie);
 }
