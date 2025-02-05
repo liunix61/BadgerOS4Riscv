@@ -26,7 +26,7 @@ $(OUTPUT)/image.hdd: $(BUILDDIR)/cache/OVMF.fd $(OUTPUT)/badger-os.elf port/gene
 	mkdir -p $(BUILDDIR)/image.dir/boot/
 	make -C lib/limine
 	cp lib/limine/BOOTRISCV64.EFI $(BUILDDIR)/image.dir/EFI/BOOT/
-	cp port/generic/limine.cfg $(BUILDDIR)/image.dir/boot/
+	cp port/generic/limine.conf $(BUILDDIR)/image.dir/boot/
 	cp $(OUTPUT)/badger-os.elf $(BUILDDIR)/image.dir/boot/
 	
 	# Format FAT filesystem

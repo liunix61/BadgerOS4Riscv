@@ -15,8 +15,6 @@
 #ifdef __ASSEMBLER__
 // clang-format off
 
-// Interrupt vector table implemented in ASM.
-    .global riscv_interrupt_vector_table
 // Called from ASM on interrupt.
     .global amd64_interrupt_handler
 // Called from ASM on trap.
@@ -24,16 +22,14 @@
 
 // clang-format on
 #else
-// Interrupt vector table implemented in ASM.
-extern uint32_t const riscv_interrupt_vector_table[32];
 // Callback from ASM to platform-specific interrupt handler.
-extern void           riscv_interrupt_handler();
+extern void amd64_interrupt_handler();
 // ASM system call wrapper function.
-extern void           riscv_syscall_wrapper();
+extern void amd64_syscall_wrapper();
 // Callback from ASM on non-syscall trap.
-extern void           riscv_trap_handler();
+extern void amd64_trap_handler(size_t trapno, size_t error_code);
 // Return a value from the syscall handler.
-extern void           syscall_return(long long value) __attribute__((noreturn));
+extern void syscall_return(long long value) __attribute__((noreturn));
 
 // Explicit context switch from kernel.
 // Interrupts must be disabled on entry and will be re-enabled on exit.

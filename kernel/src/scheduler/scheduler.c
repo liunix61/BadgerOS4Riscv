@@ -269,7 +269,7 @@ void sched_request_switch_from_isr() {
 
     // Check for load measurement timer.
     // Ignored when timestamp is 0 in case timers aren't active yet.
-    if (now && now >= info->load_measure_time) {
+    if (now && now >= info->load_measure_time && (sched_fl & SCHED_RUNNING)) {
         // Measure load on this CPU.
         sw_measure_load(now, cur_cpu, info);
         // Balance load with other running CPUs.

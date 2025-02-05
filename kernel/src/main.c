@@ -152,6 +152,8 @@ static void kernel_init() {
 static void userland_init() {
     badge_err_t ec = {0};
     logk(LOG_INFO, "Kernel initialized");
+    timestamp_us_t lim = time_us() + 10000000;
+    while (time_us() < lim);
     logk(LOG_INFO, "Starting init process");
 
     char const *initbin = "/sbin/init";

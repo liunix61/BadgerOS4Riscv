@@ -9,6 +9,6 @@ add_library(syscall
     src/spi.c
     src/syscall.c
 )
-target_compile_options(syscall PRIVATE ${badge_cflags} -ffunction-sections)
+target_compile_options(syscall PRIVATE ${badge_cflags} -ffunction-sections -masm=intel)
 target_link_options(syscall PRIVATE ${badge_cflags} -Wl,--gc-sections -nostartfiles)
 target_include_directories(syscall PRIVATE ${badge_include})

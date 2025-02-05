@@ -4,6 +4,7 @@
 #include "time.h"
 
 #include "assertions.h"
+#include "cpu/ioport.h"
 #include "interrupt.h"
 #include "port/dtb.h"
 #include "port/hardware_allocation.h"
@@ -12,8 +13,10 @@
 
 
 
-// Ticks per second.
-static uint32_t ticks_per_sec;
+// Ticks per second for the LAPIC.
+static uint32_t lapic_ticks_per_sec;
+// Ticks per second for the TSC.
+static uint32_t tsc_ticks_per_sec;
 // Tick offset for the purpose of timekeeping.
 static uint64_t base_tick;
 // Use HPET (instead of legacy PIT).
@@ -21,59 +24,77 @@ static bool     use_hpet;
 
 
 // Get the current time in ticks.
-static inline uint64_t time_ticks() {
-    // #if __riscv_xlen == 32
-    //     uint32_t ticks_lo0, ticks_lo1;
-    //     uint32_t ticks_hi0, ticks_hi1;
-    //     asm("rdtimeh %0; rdtime %1" : "=r"(ticks_hi0), "=r"(ticks_lo0));
-    //     asm("rdtimeh %0; rdtime %1" : "=r"(ticks_hi1), "=r"(ticks_lo1));
-    //     uint64_t ticks;
-    //     if (ticks_hi0 != ticks_hi1) {
-    //         ticks = ((uint64_t)ticks_hi1 << 32) | ticks_lo1;
-    //     } else {
-    //         ticks = ((uint64_t)ticks_hi0 << 32) | ticks_lo0;
-    //     }
-    // #else
-    //     uint64_t ticks;
-    //     asm("rdtime %0" : "=r"(ticks));
-    // #endif
-    // return ticks - base_tick;
-    return 0;
+__attribute__((always_inline)) static inline uint64_t time_ticks() {
+    register uint32_t lo asm("eax");
+    register uint32_t hi asm("edx");
+    asm("rdtsc" : "=r"(lo), "=r"(hi));
+    return hi * 0x0000000100000000llu + lo;
 }
 
 // Set the timer for a certain timestamp.
 static void set_timer_ticks(uint64_t timestamp) {
-    // if (support_sbi_time) {
-    //     sbi_set_timer(timestamp + base_tick);
-    // } else {
-    //     sbi_legacy_set_timer(timestamp + base_tick);
-    // }
 }
 
 // Set the CPU's timer to a certain timestamp.
 void time_set_cpu_timer(timestamp_us_t timestamp) {
-    set_timer_ticks(timestamp * ticks_per_sec / 1000000);
-    // asm("csrs sie, %0" ::"r"(1 << RISCV_INT_SUPERVISOR_TIMER));
+    set_timer_ticks(timestamp * lapic_ticks_per_sec / 1000000);
 }
 
 // Clear the CPU's timer.
 void time_clear_cpu_timer() {
-    // asm("csrc sie, %0" ::"r"(1 << RISCV_INT_SUPERVISOR_TIMER));
 }
 
 
-// Timer init code common to DTB and ACPI.
-static void time_init_common() {
-    // Set base tick to now so that time_us returns micros since boot.
+
+// Early timer init before ACPI (but not DTB).
+void time_init_before_acpi() {
+    // Start PIT at an interval with 256 divider.
+    uint64_t pit_tick = 0;
+    outb(0x43, 0x32);
+    outb(0x40, 0x00);
+    outb(0x40, 0x01);
     base_tick = time_ticks();
+    uint64_t after_tick;
+
+    while (pit_tick < 10000) {
+        after_tick = time_ticks();
+        outb(0x43, 0);
+        uint16_t tmp  = 0;
+        tmp          |= inb(0x40);
+        tmp          |= inb(0x40) << 8;
+        tmp           = ~tmp;
+        if (tmp < (uint16_t)pit_tick) {
+            pit_tick += 0x10000;
+        }
+        pit_tick = (pit_tick & ~0xffff) | tmp;
+    }
+
+    uint64_t elapsed_ns = pit_tick * 838095344 / 1000000000;
+    tsc_ticks_per_sec   = (after_tick - base_tick) * 1000000000 / elapsed_ns;
+
+    // Divide by 1.193181666
+    // Divide by  1193181666
+    // Mult.  by 0.838095344
+    // Mult.  by   838095344
+
     // Finally, run generic timer init code.
     time_init_generic();
 }
 
+// Initialise timer using ACPI.
+void time_init_acpi() {
+}
+
 // Get current time in microseconds.
 timestamp_us_t time_us() {
-    if (!ticks_per_sec) {
+    if (!tsc_ticks_per_sec) {
         return 0;
     }
-    return time_ticks() * 1000000 / ticks_per_sec;
+    // return time_ticks() - base_tick;
+    if (base_tick < time_ticks()) {
+        panic_abort();
+    }
+    return (time_ticks() - base_tick) >> 11;
+    // return (time_ticks() - base_tick) / 2500llu;
+    // return (time_ticks() - base_tick) * 1000000 / tsc_ticks_per_sec;
 }

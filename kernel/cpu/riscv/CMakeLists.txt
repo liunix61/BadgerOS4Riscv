@@ -19,6 +19,7 @@ set(cpu_src
 set(cpu_include ${CMAKE_CURRENT_LIST_DIR}/include)
 set(cpu_link)
 set(cpu_flags)
+set(kbelf_target riscv)
 
 if(DEFINED cpu_multicore)
     set(cpu_src ${cpu_src} ${CMAKE_CURRENT_LIST_DIR}/src/cpu1_entrypoint.S)

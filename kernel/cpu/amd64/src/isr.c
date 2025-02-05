@@ -68,8 +68,16 @@ static void kill_proc_on_trap() {
     assert_unreachable();
 }
 
+// Generic interrupt handler that runs all callbacks on an IRQ.
+void generic_interrupt_handler(int irq);
+
 // Called from ASM on non-system call trap.
 void amd64_trap_handler(size_t trapno, size_t error_code) {
+    if (trapno >= 32) {
+        generic_interrupt_handler(trapno - 32);
+        return;
+    }
+
     isr_ctx_t recurse_ctx;
     recurse_ctx.mpu_ctx  = NULL;
     recurse_ctx.flags    = ISR_CTX_FLAG_IN_ISR | ISR_CTX_FLAG_KERNEL;

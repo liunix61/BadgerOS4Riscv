@@ -46,6 +46,12 @@ typedef union {
 #define MSR_KGSBASE 0xc0000102
 // Address of EFER MSR; extended feature enable register.
 #define MSR_EFER    0xc0000080
+// Address of the STAR MSR; CS/SS for user/kernel.
+#define MSR_STAR    0xc0000081
+// Adress of the LSTAR MSR; entry point for system calls.
+#define MSR_LSTAR   0xc0000082
+// Address of the FMASK MSR; flags to clear when entering kernel.
+#define MSR_FMASK   0xc0000084
 
 
 

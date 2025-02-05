@@ -208,6 +208,7 @@ void port_postheap_init() {
 #endif
     {
         // Initialize ACPI.
+        time_init_before_acpi();
     }
 
     // Reclaim all reclaimable memory.

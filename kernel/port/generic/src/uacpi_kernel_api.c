@@ -14,18 +14,25 @@
 
 
 /*
- * NOTE:
- * 'byte_width' is ALWAYS one of 1, 2, 4. Since PCI registers are 32 bits wide
- * this must be able to handle e.g. a 1-byte access by reading at the nearest
- * 4-byte aligned offset below, then masking the value to select the target
- * byte.
+ * Read & write the configuration space of a previously open PCI device.
  */
-uacpi_status
-    uacpi_kernel_pci_read(uacpi_pci_address *address, uacpi_size offset, uacpi_u8 byte_width, uacpi_u64 *value) {
+uacpi_status uacpi_kernel_pci_read8(uacpi_handle device, uacpi_size offset, uacpi_u8 *value) {
     return UACPI_STATUS_UNIMPLEMENTED;
 }
-uacpi_status
-    uacpi_kernel_pci_write(uacpi_pci_address *address, uacpi_size offset, uacpi_u8 byte_width, uacpi_u64 value) {
+uacpi_status uacpi_kernel_pci_read16(uacpi_handle device, uacpi_size offset, uacpi_u16 *value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+uacpi_status uacpi_kernel_pci_read32(uacpi_handle device, uacpi_size offset, uacpi_u32 *value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+
+uacpi_status uacpi_kernel_pci_write8(uacpi_handle device, uacpi_size offset, uacpi_u8 value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+uacpi_status uacpi_kernel_pci_write16(uacpi_handle device, uacpi_size offset, uacpi_u16 value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+uacpi_status uacpi_kernel_pci_write32(uacpi_handle device, uacpi_size offset, uacpi_u32 value) {
     return UACPI_STATUS_UNIMPLEMENTED;
 }
 
@@ -44,14 +51,26 @@ void uacpi_kernel_io_unmap(uacpi_handle handle) {
  * at a 0-based 'offset' within the range.
  *
  * NOTE:
- * 'byte_width' is ALWAYS one of 1, 2, 4. You are NOT allowed to break e.g. a
- * 4-byte access into four 1-byte accesses. Hardware ALWAYS expects accesses to
- * be of the exact width.
+ * You are NOT allowed to break e.g. a 4-byte access into four 1-byte accesses.
+ * Hardware ALWAYS expects accesses to be of the exact width.
  */
-uacpi_status uacpi_kernel_io_read(uacpi_handle, uacpi_size offset, uacpi_u8 byte_width, uacpi_u64 *value) {
+uacpi_status uacpi_kernel_io_read8(uacpi_handle, uacpi_size offset, uacpi_u8 *out_value) {
     return UACPI_STATUS_UNIMPLEMENTED;
 }
-uacpi_status uacpi_kernel_io_write(uacpi_handle, uacpi_size offset, uacpi_u8 byte_width, uacpi_u64 value) {
+uacpi_status uacpi_kernel_io_read16(uacpi_handle, uacpi_size offset, uacpi_u16 *out_value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+uacpi_status uacpi_kernel_io_read32(uacpi_handle, uacpi_size offset, uacpi_u32 *out_value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+
+uacpi_status uacpi_kernel_io_write8(uacpi_handle, uacpi_size offset, uacpi_u8 in_value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+uacpi_status uacpi_kernel_io_write16(uacpi_handle, uacpi_size offset, uacpi_u16 in_value) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+uacpi_status uacpi_kernel_io_write32(uacpi_handle, uacpi_size offset, uacpi_u32 in_value) {
     return UACPI_STATUS_UNIMPLEMENTED;
 }
 
