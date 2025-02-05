@@ -69,13 +69,8 @@ void time_init_before_acpi() {
         pit_tick = (pit_tick & ~0xffff) | tmp;
     }
 
-    uint64_t elapsed_ns = pit_tick * 838095344 / 1000000000;
+    uint64_t elapsed_ns = pit_tick * 838095344 / 2000000000;
     tsc_ticks_per_sec   = (after_tick - base_tick) * 1000000000 / elapsed_ns;
-
-    // Divide by 1.193181666
-    // Divide by  1193181666
-    // Mult.  by 0.838095344
-    // Mult.  by   838095344
 
     // Finally, run generic timer init code.
     time_init_generic();
@@ -90,11 +85,5 @@ timestamp_us_t time_us() {
     if (!tsc_ticks_per_sec) {
         return 0;
     }
-    // return time_ticks() - base_tick;
-    if (base_tick < time_ticks()) {
-        panic_abort();
-    }
-    return (time_ticks() - base_tick) >> 11;
-    // return (time_ticks() - base_tick) / 2500llu;
-    // return (time_ticks() - base_tick) * 1000000 / tsc_ticks_per_sec;
+    return (time_ticks() - base_tick) * 1000000 / tsc_ticks_per_sec;
 }
