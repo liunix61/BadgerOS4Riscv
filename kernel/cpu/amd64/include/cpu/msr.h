@@ -57,19 +57,19 @@ typedef union {
 
 #ifndef __ASSEMBLER__
 // Read an MSR.
-static inline uint64_t msr_read(uint32_t address) {
-    register uint32_t addr asm("ecx") = address;
-    register uint32_t lo asm("eax");
-    register uint32_t hi asm("edx");
-    asm("rdmsr" : "=r"(lo), "=r"(hi) : "r"(addr) : "memory");
+__attribute__((always_inline)) static inline uint64_t msr_read(uint32_t address) {
+    uint32_t addr = address;
+    uint32_t lo;
+    uint32_t hi;
+    asm("rdmsr" : "=a"(lo), "=d"(hi) : "c"(addr) : "memory");
     return ((uint64_t)hi << 32) | lo;
 }
 
 // Write an MSR.
-static inline void msr_write(uint32_t address, uint64_t value) {
-    register uint32_t addr asm("ecx") = address;
-    register uint32_t lo asm("eax")   = value;
-    register uint32_t hi asm("edx")   = value >> 32;
-    asm volatile("wrmsr" ::"r"(lo), "r"(hi), "r"(addr) : "memory");
+__attribute__((always_inline)) static inline void msr_write(uint32_t address, uint64_t value) {
+    uint32_t addr = address;
+    uint32_t lo   = value;
+    uint32_t hi   = value >> 32;
+    asm volatile("wrmsr" ::"a"(lo), "d"(hi), "c"(addr) : "memory");
 }
 #endif

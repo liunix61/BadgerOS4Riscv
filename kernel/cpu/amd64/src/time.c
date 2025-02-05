@@ -25,10 +25,10 @@ static bool     use_hpet;
 
 // Get the current time in ticks.
 __attribute__((always_inline)) static inline uint64_t time_ticks() {
-    register uint32_t lo asm("eax");
-    register uint32_t hi asm("edx");
-    asm("rdtsc" : "=r"(lo), "=r"(hi));
-    return hi * 0x0000000100000000llu + lo;
+    uint32_t lo;
+    uint32_t hi;
+    asm("rdtsc" : "=a"(lo), "=d"(hi));
+    return (hi << 32llu) | lo;
 }
 
 // Set the timer for a certain timestamp.

@@ -209,6 +209,8 @@ void port_postheap_init() {
     {
         // Initialize ACPI.
         time_init_before_acpi();
+        uacpi_status st = uacpi_initialize(0);
+        assert_always(st == UACPI_STATUS_OK);
     }
 
     // Reclaim all reclaimable memory.

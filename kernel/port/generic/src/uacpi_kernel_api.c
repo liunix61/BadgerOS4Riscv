@@ -6,12 +6,25 @@
 #include "interrupt.h"
 #include "log.h"
 #include "malloc.h"
+#include "memprotect.h"
 #include "scheduler/scheduler.h"
 #include "spinlock.h"
 #include "time.h"
 #include "uacpi/kernel_api.h"
 
 
+
+/*
+ * Open a PCI device at 'address' for reading & writing.
+ *
+ * The handle returned via 'out_handle' is used to perform IO on the
+ * configuration space of the device.
+ */
+uacpi_status uacpi_kernel_pci_device_open(uacpi_pci_address address, uacpi_handle *out_handle) {
+    return UACPI_STATUS_UNIMPLEMENTED;
+}
+void uacpi_kernel_pci_device_close(uacpi_handle) {
+}
 
 /*
  * Read & write the configuration space of a previously open PCI device.
@@ -74,8 +87,27 @@ uacpi_status uacpi_kernel_io_write32(uacpi_handle, uacpi_size offset, uacpi_u32 
     return UACPI_STATUS_UNIMPLEMENTED;
 }
 
-void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len);
-void  uacpi_kernel_unmap(void *addr, uacpi_size len);
+void *uacpi_kernel_map(uacpi_phys_addr paddr, uacpi_size len) {
+    size_t off  = paddr % MEMMAP_PAGE_SIZE;
+    len        += paddr % MEMMAP_PAGE_SIZE;
+    paddr      -= paddr % MEMMAP_PAGE_SIZE;
+    if (len % MEMMAP_PAGE_SIZE) {
+        len += MEMMAP_PAGE_SIZE - len % MEMMAP_PAGE_SIZE;
+    }
+    size_t vaddr = memprotect_alloc_vaddr(len);
+    assert_always(memprotect_k(vaddr, paddr, len, MEMPROTECT_FLAG_RW));
+    return (void *)(vaddr + off);
+}
+void uacpi_kernel_unmap(void *addr, uacpi_size len) {
+    size_t vaddr  = (size_t)addr;
+    len          += vaddr % MEMMAP_PAGE_SIZE;
+    vaddr        -= vaddr % MEMMAP_PAGE_SIZE;
+    if (len % MEMMAP_PAGE_SIZE) {
+        len += MEMMAP_PAGE_SIZE - len % MEMMAP_PAGE_SIZE;
+    }
+    assert_always(memprotect_k(vaddr, 0, len, 0));
+    memprotect_alloc_vaddr(vaddr);
+}
 
 /*
  * Allocate a block of memory of 'size' bytes.
