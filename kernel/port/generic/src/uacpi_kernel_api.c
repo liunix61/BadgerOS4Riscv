@@ -88,6 +88,7 @@ uacpi_status uacpi_kernel_io_write32(uacpi_handle, uacpi_size offset, uacpi_u32 
 }
 
 void *uacpi_kernel_map(uacpi_phys_addr paddr, uacpi_size len) {
+    logkf(LOG_DEBUG, "uacpi_kernel_map(0x%{u64;x}, 0x%{size;x})", paddr, len);
     size_t off  = paddr % MEMMAP_PAGE_SIZE;
     len        += paddr % MEMMAP_PAGE_SIZE;
     paddr      -= paddr % MEMMAP_PAGE_SIZE;
@@ -95,6 +96,14 @@ void *uacpi_kernel_map(uacpi_phys_addr paddr, uacpi_size len) {
         len += MEMMAP_PAGE_SIZE - len % MEMMAP_PAGE_SIZE;
     }
     size_t vaddr = memprotect_alloc_vaddr(len);
+    logkf(
+        LOG_DEBUG,
+        "memprotect_k(0x%{size;x}, 0x%{size;x}, 0x%{size;x}, 0x%{u32;x})",
+        vaddr,
+        paddr,
+        len,
+        MEMPROTECT_FLAG_RW
+    );
     assert_always(memprotect_k(vaddr, paddr, len, MEMPROTECT_FLAG_RW));
     return (void *)(vaddr + off);
 }
