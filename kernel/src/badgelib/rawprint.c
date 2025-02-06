@@ -13,22 +13,8 @@ char const hextab[] = "0123456789ABCDEF";
 
 // Simple printer with specified length.
 void rawprint_substr(char const *msg, size_t length) {
-    if (!msg)
-        return;
-    char prev = 0;
     while (length--) {
-        if (*msg == '\r') {
-            rawputc('\r');
-            rawputc('\n');
-        } else if (*msg == '\n') {
-            if (prev != '\r') {
-                rawputc('\r');
-                rawputc('\n');
-            }
-        } else {
-            rawputc(*msg);
-        }
-        prev = *msg;
+        rawputc(*msg);
         msg++;
     }
 }

@@ -53,8 +53,8 @@ void mmu_early_init() {
     msr_write(MSR_EFER, efer.val);
 
     // Check for SMAP support.
-    smap_support = cpuid(0x07).ebx & (1 << 20);
-    pcid_support = cpuid(0x17).ecx & (1 << 17);
+    smap_support = false; // cpuid(0x07).ebx & (1 << 20);
+    pcid_support = false; // cpuid(0x17).ecx & (1 << 17);
 
     // Enable PCIDE and SMAP if supported.
     x86_cr4_t cr4;
@@ -65,7 +65,7 @@ void mmu_early_init() {
 
     // TODO: Detect number of paging levels supported by the CPU.
     mmu_levels     = 4;
-    mmu_half_size  = 1llu << (12 + 9 * mmu_levels);
+    mmu_half_size  = 1llu << (11 + 9 * mmu_levels);
     mmu_high_vaddr = -mmu_half_size;
 
     if (smap_support) {

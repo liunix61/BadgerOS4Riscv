@@ -17,6 +17,7 @@
 #include "scheduler/isr.h"
 #include "scheduler/types.h"
 #include "smp.h"
+#include "spinlock.h"
 
 
 
@@ -27,7 +28,7 @@ static atomic_int        loadbalance_ready_count;
 // CPU-local scheduler structs.
 static sched_cpulocal_t *cpu_ctx;
 // Threads list mutex.
-static mutex_t           threads_mtx = MUTEX_T_INIT_SHARED_ISR;
+static spinlock_t        threads_lock = SPINLOCK_T_INIT_SHARED;
 // Number of threads that exist.
 static size_t            threads_len;
 // Capacity for thread list.
@@ -37,7 +38,7 @@ static sched_thread_t  **threads;
 // Thread ID counter.
 static atomic_int        tid_counter = 1;
 // Unused thread pool mutex.
-static mutex_t           unused_mtx  = MUTEX_T_INIT_ISR;
+static spinlock_t        unused_lock;
 // Pool of unused thread handles.
 static dlist_t           dead_threads;
 
@@ -86,7 +87,7 @@ static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
 // The thread must not yet be in any runqueue.
 bool thread_handoff(sched_thread_t *thread, int cpu, bool force, int max_load) {
     sched_cpulocal_t *info = cpu_ctx + cpu;
-    assert_dev_keep(mutex_acquire_shared_from_isr(NULL, &info->run_mtx, TIMESTAMP_US_MAX));
+    spinlock_take_shared(&info->run_lock);
 
     int  flags      = atomic_load(&info->flags);
     bool is_running = (flags & SCHED_RUNNING) && !(flags & SCHED_EXITING);
@@ -120,12 +121,12 @@ bool thread_handoff(sched_thread_t *thread, int cpu, bool force, int max_load) {
 
     if (force || has_space) {
         // Scheduler is running and has capacity for this thread.
-        assert_dev_keep(mutex_acquire_from_isr(NULL, &info->incoming_mtx, TIMESTAMP_US_MAX));
+        spinlock_take(&info->incoming_lock);
         dlist_append(&info->incoming, &thread->node);
-        assert_dev_keep(mutex_release_from_isr(NULL, &info->incoming_mtx));
+        spinlock_release(&info->incoming_lock);
     }
 
-    assert_dev_keep(mutex_release_shared_from_isr(NULL, &info->run_mtx));
+    spinlock_release_shared(&info->run_lock);
     return (flags & SCHED_RUNNING) && !(flags & SCHED_EXITING);
 }
 
@@ -144,7 +145,7 @@ static void sw_handle_sched_flags(timestamp_us_t now, int cur_cpu, sched_cpuloca
 
     } else if (sched_fl & SCHED_EXITING) {
         // Exit the scheduler on this CPU.
-        assert_dev_keep(mutex_acquire_from_isr(NULL, &info->run_mtx, TIMESTAMP_US_MAX));
+        spinlock_take(&info->run_lock);
         atomic_store_explicit(&info->load_average, 0, memory_order_relaxed);
         atomic_store_explicit(&info->load_estimate, 0, memory_order_relaxed);
         atomic_fetch_sub_explicit(&running_sched_count, 1, memory_order_relaxed);
@@ -159,7 +160,7 @@ static void sw_handle_sched_flags(timestamp_us_t now, int cur_cpu, sched_cpuloca
                 cpu = (cpu + 1) % smp_count;
             } while (cpu == cur_cpu || !thread_handoff(thread, cpu, false, __INT_MAX__));
         }
-        assert_dev_keep(mutex_release_from_isr(NULL, &info->run_mtx));
+        spinlock_release(&info->run_lock);
 
         // Power off this CPU.
         assert_dev_keep(smp_poweroff());
@@ -280,7 +281,7 @@ void sched_request_switch_from_isr() {
     }
 
     // Check for incoming threads.
-    assert_dev_keep(mutex_acquire_from_isr(NULL, &info->incoming_mtx, TIMESTAMP_US_MAX));
+    spinlock_take(&info->incoming_lock);
     while (info->incoming.len) {
         sched_thread_t *thread = (void *)dlist_pop_front(&info->incoming);
         assert_dev_drop(atomic_load(&thread->flags) & THREAD_RUNNING);
@@ -290,7 +291,7 @@ void sched_request_switch_from_isr() {
             dlist_append(&info->queue, &thread->node);
         }
     }
-    assert_dev_keep(mutex_release_from_isr(NULL, &info->incoming_mtx));
+    spinlock_release(&info->incoming_lock);
 
     // Check for runnable threads.
     while (info->queue.len) {
@@ -306,11 +307,11 @@ void sched_request_switch_from_isr() {
 
         if (kill_thread) {
             // Exiting thread/process; clean up thread.
-            assert_dev_keep(mutex_acquire_from_isr(NULL, &unused_mtx, TIMESTAMP_US_MAX));
+            spinlock_take(&unused_lock);
             atomic_fetch_or(&thread->flags, THREAD_EXITED);
             atomic_fetch_and(&thread->flags, ~(THREAD_RUNNING | THREAD_EXITING));
             dlist_append(&dead_threads, &thread->node);
-            assert_dev_keep(mutex_release_from_isr(NULL, &unused_mtx));
+            spinlock_release(&unused_lock);
 
         } else if (((flags & THREAD_KSUSPEND) || !(flags & THREAD_PRIVILEGED)) && (flags & THREAD_SUSPENDING)) {
             // Userspace and/or kernel thread being suspended.
@@ -357,18 +358,11 @@ static void sched_housekeeping(int taskno, void *arg) {
     (void)taskno;
     (void)arg;
 
-    // Acquire the mutex with interrupts disabled without blocking other threads.
-    while (1) {
-        irq_disable();
-        if (mutex_acquire_from_isr(NULL, &threads_mtx, 500)) {
-            break;
-        }
-        irq_enable();
-        thread_yield();
-    }
+    irq_disable();
+    spinlock_take(&threads_lock);
 
     // Get list of dead threads.
-    assert_dev_keep(mutex_acquire_from_isr(NULL, &unused_mtx, TIMESTAMP_US_MAX));
+    spinlock_take(&unused_lock);
     dlist_t         tmp  = DLIST_EMPTY;
     sched_thread_t *node = (void *)dead_threads.head;
     while (node) {
@@ -379,7 +373,7 @@ static void sched_housekeeping(int taskno, void *arg) {
         }
         node = next;
     }
-    assert_dev_keep(mutex_release_from_isr(NULL, &unused_mtx));
+    spinlock_release(&unused_lock);
 
     // Clean up all dead threads.
     while (tmp.len) {
@@ -395,7 +389,7 @@ static void sched_housekeeping(int taskno, void *arg) {
         free(thread);
     }
 
-    assert_dev_keep(mutex_release_from_isr(NULL, &threads_mtx));
+    spinlock_release(&threads_lock);
     irq_enable();
 }
 
@@ -414,9 +408,9 @@ void sched_init() {
     assert_always(cpu_ctx);
     mem_set(cpu_ctx, 0, smp_count * sizeof(sched_cpulocal_t));
     for (int i = 0; i < smp_count; i++) {
-        cpu_ctx[i].run_mtx      = MUTEX_T_INIT_SHARED_ISR;
-        cpu_ctx[i].incoming_mtx = MUTEX_T_INIT_ISR;
-        void *stack             = malloc(8192);
+        cpu_ctx[i].run_lock      = SPINLOCK_T_INIT_SHARED;
+        cpu_ctx[i].incoming_lock = SPINLOCK_T_INIT_SHARED;
+        void *stack              = malloc(8192);
         assert_always(stack);
         cpu_ctx[i].idle_thread.kernel_stack_bottom  = (size_t)stack;
         cpu_ctx[i].idle_thread.kernel_stack_top     = (size_t)stack + 8192;
@@ -424,6 +418,7 @@ void sched_init() {
         cpu_ctx[i].idle_thread.flags                = THREAD_PRIVILEGED;
         sched_prepare_kernel_entry(&cpu_ctx[i].idle_thread, idle_func, NULL);
     }
+    atomic_thread_fence(memory_order_release);
     hk_add_repeated(0, 1000000, sched_housekeeping, NULL);
 }
 
@@ -485,9 +480,9 @@ void sched_exec() {
 
 // Exit the scheduler and subsequenty shut down the CPU.
 void sched_exit(int cpu) {
-    assert_dev_keep(mutex_acquire(NULL, &cpu_ctx[cpu].run_mtx, TIMESTAMP_US_MAX));
+    spinlock_take(&cpu_ctx[cpu].run_lock);
     atomic_fetch_or_explicit(&cpu_ctx[cpu].flags, SCHED_EXITING, memory_order_relaxed);
-    assert_dev_keep(mutex_release(NULL, &cpu_ctx[cpu].run_mtx));
+    spinlock_release(&cpu_ctx[cpu].run_lock);
 }
 
 
@@ -504,9 +499,11 @@ sched_thread_t *sched_current_thread() {
 
 // Returns the associated thread struct.
 sched_thread_t *sched_get_thread(tid_t tid) {
-    assert_always(mutex_acquire_shared(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+    bool ie = irq_disable();
+    spinlock_take_shared(&threads_lock);
     sched_thread_t *thread = find_thread(tid);
-    assert_always(mutex_release_shared(NULL, &threads_mtx));
+    spinlock_release_shared(&threads_lock);
+    irq_enable_if(ie);
     return thread;
 }
 
@@ -552,9 +549,11 @@ tid_t thread_new_user(
     thread->user_isr_ctx.mpu_ctx  = &process->memmap.mpu_ctx;
     sched_prepare_user_entry(thread, user_entrypoint, user_arg);
 
-    assert_dev_keep(mutex_acquire(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+    irq_disable();
+    spinlock_take(&threads_lock);
     bool success = array_lencap_insert(&threads, sizeof(void *), &threads_len, &threads_cap, &thread, threads_len);
-    assert_dev_keep(mutex_release(NULL, &threads_mtx));
+    spinlock_release(&threads_lock);
+    irq_enable();
     if (!success) {
         if (thread->name) {
             free(thread->name);
@@ -605,9 +604,11 @@ tid_t thread_new_kernel(badge_err_t *ec, char const *name, sched_entry_t entrypo
     thread->flags                 |= THREAD_PRIVILEGED | THREAD_KERNEL;
     sched_prepare_kernel_entry(thread, entrypoint, arg);
 
-    assert_dev_keep(mutex_acquire(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+    irq_disable();
+    spinlock_take(&threads_lock);
     bool success = array_lencap_insert(&threads, sizeof(void *), &threads_len, &threads_cap, &thread, threads_len);
-    assert_dev_keep(mutex_release(NULL, &threads_mtx));
+    spinlock_release(&threads_lock);
+    irq_enable();
     if (!success) {
         if (thread->name) {
             free(thread->name);
@@ -626,7 +627,8 @@ tid_t thread_new_kernel(badge_err_t *ec, char const *name, sched_entry_t entrypo
 
 // Do not wait for thread to be joined; clean up immediately.
 void thread_detach(badge_err_t *ec, tid_t tid) {
-    assert_always(mutex_acquire_shared(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+    irq_disable();
+    spinlock_take_shared(&threads_lock);
     sched_thread_t *thread = find_thread(tid);
     if (thread) {
         atomic_fetch_or(&thread->flags, THREAD_DETACHED);
@@ -634,7 +636,8 @@ void thread_detach(badge_err_t *ec, tid_t tid) {
     } else {
         badge_err_set(ec, ELOC_THREADS, ECAUSE_NOTFOUND);
     }
-    assert_always(mutex_release_shared(NULL, &threads_mtx));
+    spinlock_release_shared(&threads_lock);
+    irq_enable();
 }
 
 
@@ -647,22 +650,31 @@ void thread_yield() {
 }
 
 // Resume a thread from a timer ISR.
-static void thread_resume_from_timer(void *cookie) {
-    tid_t tid = (tid_t)(long)cookie;
-    thread_resume_now_from_isr(NULL, tid);
-}
-
-// Set thread wakeup timer.
-static void thread_set_wake_time(timestamp_us_t time) {
-    sched_thread_t *thread = sched_current_thread();
-    time_add_async_task(time, thread_resume_from_timer, (void *)(long)thread->id);
+static void thread_resume_from_timer(void *cookie0) {
+    struct {
+        tid_t    tid;
+        uint64_t ticket;
+    } *cookie = cookie0;
+    thread_unblock(cookie->tid, cookie->ticket);
 }
 
 // Sleep for an amount of microseconds.
 void thread_sleep(timestamp_us_t delay) {
-    // Set the sleep timer; the kernel thread will yield and wake up later.
-    thread_set_wake_time(time_us() + delay);
-    thread_suspend(NULL, sched_current_tid(), true);
+    irq_disable();
+    struct {
+        tid_t    tid;
+        uint64_t ticket;
+    } cookie = {
+        sched_current_tid(),
+        thread_block(),
+    };
+    timertask_t task = {
+        .callback  = thread_resume_from_timer,
+        .cookie    = &cookie,
+        .timestamp = time_us() + delay,
+    };
+    time_add_async_task(&task);
+    thread_yield();
 }
 
 // Implementation of thread yield system call.
@@ -672,10 +684,38 @@ void syscall_thread_yield() {
 
 // Implementation of usleep system call.
 void syscall_thread_sleep(timestamp_us_t delay) {
-    // Set the sleep timer; the thread will drop to user mode and then pause.
-    thread_set_wake_time(time_us() + delay);
-    thread_suspend(NULL, sched_current_tid(), false);
+    thread_sleep(delay);
 }
+
+// Block this thread and return a blocking ticket.
+uint64_t thread_block() {
+    assert_dev_drop(!irq_is_enabled());
+    sched_thread_t *self = thread_dequeue_self();
+    self->unblock_cpu    = smp_cur_cpu();
+    atomic_fetch_or(&self->flags, THREAD_BLOCKED);
+    return ++self->blocking_ticket;
+}
+
+// Unblock a thread.
+bool thread_unblock(tid_t tid, uint64_t ticket) {
+    bool ie = irq_disable();
+    spinlock_take_shared(&threads_lock);
+
+    sched_thread_t *thread = find_thread(tid);
+    int             flags;
+    bool            success = thread && thread->blocking_ticket >= ticket &&
+                   ((flags = atomic_fetch_and(&thread->flags, ~THREAD_BLOCKED)) & THREAD_BLOCKED);
+    if (success) {
+        assert_dev_drop(ticket == thread->blocking_ticket);
+        thread_handoff(thread, thread->unblock_cpu, true, 0);
+    }
+
+    spinlock_release_shared(&threads_lock);
+    irq_enable_if(ie);
+
+    return success;
+}
+
 
 
 // Pauses execution of a thread.
@@ -684,13 +724,13 @@ void thread_suspend(badge_err_t *ec, tid_t tid, bool suspend_kernel) {
     sched_thread_t *self = sched_current_thread();
     sched_thread_t *thread;
 
+    irq_disable();
     if (tid == self->id) {
-        // If suspending self, disable IRQs to guard suspension.
-        irq_disable();
+        // Suspending this thread.
         thread = self;
     } else {
-        // If suspending another thread, acquire mutex to guard existance.
-        assert_always(mutex_acquire_shared(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+        // Suspending another thread.
+        spinlock_take_shared(&threads_lock);
         thread = find_thread(tid);
     }
 
@@ -721,7 +761,8 @@ void thread_suspend(badge_err_t *ec, tid_t tid, bool suspend_kernel) {
         }
     } else {
         // If suspending another thread, release mutex.
-        assert_always(mutex_release_shared(NULL, &threads_mtx));
+        spinlock_release_shared(&threads_lock);
+        irq_enable();
     }
 }
 
@@ -743,27 +784,19 @@ static bool thread_try_mark_running(sched_thread_t *thread, bool now) {
 
 // Resumes a previously suspended thread or starts it.
 static void thread_resume_impl(badge_err_t *ec, tid_t tid, bool now, bool from_isr) {
-    if (from_isr) {
-        assert_always(mutex_acquire_shared_from_isr(NULL, &threads_mtx, TIMESTAMP_US_MAX));
-    } else {
-        assert_always(mutex_acquire_shared(NULL, &threads_mtx, TIMESTAMP_US_MAX));
-    }
+    irq_disable_if(!from_isr);
+    spinlock_take_shared(&threads_lock);
     sched_thread_t *thread = find_thread(tid);
     if (thread) {
         if (thread_try_mark_running(thread, now)) {
-            irq_disable_if(!from_isr);
             thread_handoff(thread, smp_cur_cpu(), true, 0);
-            irq_enable_if(!from_isr);
         }
         badge_err_set_ok(ec);
     } else {
         badge_err_set(ec, ELOC_THREADS, ECAUSE_NOTFOUND);
     }
-    if (from_isr) {
-        assert_always(mutex_release_shared_from_isr(NULL, &threads_mtx));
-    } else {
-        assert_always(mutex_release_shared(NULL, &threads_mtx));
-    }
+    spinlock_release_shared(&threads_lock);
+    irq_enable_if(!from_isr);
 }
 
 // Resumes a previously suspended thread or starts it.
@@ -790,7 +823,8 @@ void thread_resume_now_from_isr(badge_err_t *ec, tid_t tid) {
 
 // Returns whether a thread is running; it is neither suspended nor has it exited.
 bool thread_is_running(badge_err_t *ec, tid_t tid) {
-    assert_always(mutex_acquire_shared(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+    irq_disable();
+    spinlock_take_shared(&threads_lock);
     sched_thread_t *thread = find_thread(tid);
     bool            res    = false;
     if (thread) {
@@ -799,7 +833,8 @@ bool thread_is_running(badge_err_t *ec, tid_t tid) {
     } else {
         badge_err_set(ec, ELOC_THREADS, ECAUSE_NOTFOUND);
     }
-    assert_always(mutex_release_shared(NULL, &threads_mtx));
+    spinlock_release_shared(&threads_lock);
+    irq_enable();
     return res;
 }
 
@@ -818,20 +853,25 @@ void thread_exit(int code) {
 
 // Wait for another thread to exit.
 void thread_join(tid_t tid) {
+    // TODO: This can be done more efficiently.
     while (1) {
-        assert_always(mutex_acquire_shared(NULL, &threads_mtx, TIMESTAMP_US_MAX));
+        irq_disable();
+        spinlock_take_shared(&threads_lock);
         sched_thread_t *thread = find_thread(tid);
         if (thread) {
             if (atomic_load(&thread->flags) & THREAD_EXITED) {
                 atomic_fetch_or(&thread->flags, THREAD_DETACHED);
-                assert_always(mutex_release_shared(NULL, &threads_mtx));
+                spinlock_release_shared(&threads_lock);
+                irq_enable();
                 return;
             }
         } else {
-            assert_always(mutex_release_shared(NULL, &threads_mtx));
+            spinlock_release_shared(&threads_lock);
+            irq_enable();
             return;
         }
-        assert_always(mutex_release_shared(NULL, &threads_mtx));
+        spinlock_release_shared(&threads_lock);
+        // No need to re-enable IRQs because the yield implicitly does so.
         thread_yield();
     }
 }

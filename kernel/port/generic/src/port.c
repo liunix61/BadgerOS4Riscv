@@ -64,7 +64,7 @@ __attribute__((section(".requests_end"))) LIMINE_REQUESTS_END_MARKER;
 // Returns the PHYSICAL address of the RSDP structure via *out_rsdp_address.
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
     if (rsdp_req.response) {
-        *out_rsdp_address = (uacpi_phys_addr)rsdp_req.response->address;
+        *out_rsdp_address = (uacpi_phys_addr)rsdp_req.response->address - (uacpi_phys_addr)mmu_hhdm_vaddr;
         return UACPI_STATUS_OK;
     } else {
         logk(LOG_WARN, "uACPI asked for RSDP, but it does not exist");
@@ -199,6 +199,10 @@ void port_early_init() {
 
 // Post-heap hardware initialization.
 void port_postheap_init() {
+}
+
+// Full hardware initialization.
+void port_init() {
 #ifdef PORT_ENABLE_DTB
     if (dtb_req.response) {
         // Parse and process DTB.
@@ -211,6 +215,10 @@ void port_postheap_init() {
         time_init_before_acpi();
         uacpi_status st = uacpi_initialize(0);
         assert_always(st == UACPI_STATUS_OK);
+        st = uacpi_namespace_load();
+        assert_always(st == UACPI_STATUS_OK);
+        // st = uacpi_namespace_initialize();
+        // assert_always(st == UACPI_STATUS_OK);
     }
 
     // Reclaim all reclaimable memory.
@@ -238,10 +246,7 @@ void port_postheap_init() {
         logkf_from_isr(LOG_DEBUG, "Adding memory at 0x%{size;x}-0x%{size;x}", base, base + len - 1);
         init_pool((void *)(base + mmu_hhdm_vaddr), (void *)(base + len + mmu_hhdm_vaddr), 0);
     }
-}
 
-// Full hardware initialization.
-void port_init() {
     // Enumerate PCIe devices.
     pcie_ecam_detect();
 }

@@ -2,15 +2,21 @@
 // SPDX-License-Identifier: MIT
 
 #include "assertions.h"
+#include "config.h"
 #include "housekeeping.h"
 #include "interrupt.h"
 #include "log.h"
 #include "malloc.h"
 #include "memprotect.h"
 #include "scheduler/scheduler.h"
+#include "semaphore.h"
 #include "spinlock.h"
 #include "time.h"
 #include "uacpi/kernel_api.h"
+
+#ifdef CONFIG_CPU_amd64
+#include "cpu/ioport.h"
+#endif
 
 
 
@@ -54,11 +60,13 @@ uacpi_status uacpi_kernel_pci_write32(uacpi_handle device, uacpi_size offset, ua
  * handle that can be used for reading and writing the IO range.
  */
 uacpi_status uacpi_kernel_io_map(uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+    *out_handle = (void *)(size_t)base;
+    return UACPI_STATUS_OK;
 }
 void uacpi_kernel_io_unmap(uacpi_handle handle) {
 }
 
+#ifdef CONFIG_CPU_amd64
 /*
  * Read/Write the IO range mapped via uacpi_kernel_io_map
  * at a 0-based 'offset' within the range.
@@ -67,28 +75,35 @@ void uacpi_kernel_io_unmap(uacpi_handle handle) {
  * You are NOT allowed to break e.g. a 4-byte access into four 1-byte accesses.
  * Hardware ALWAYS expects accesses to be of the exact width.
  */
-uacpi_status uacpi_kernel_io_read8(uacpi_handle, uacpi_size offset, uacpi_u8 *out_value) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_io_read8(uacpi_handle handle, uacpi_size offset, uacpi_u8 *out_value) {
+    *out_value = inb((size_t)handle + offset);
+    return UACPI_STATUS_OK;
 }
-uacpi_status uacpi_kernel_io_read16(uacpi_handle, uacpi_size offset, uacpi_u16 *out_value) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_io_read16(uacpi_handle handle, uacpi_size offset, uacpi_u16 *out_value) {
+    *out_value = inw((size_t)handle + offset);
+    return UACPI_STATUS_OK;
 }
-uacpi_status uacpi_kernel_io_read32(uacpi_handle, uacpi_size offset, uacpi_u32 *out_value) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_io_read32(uacpi_handle handle, uacpi_size offset, uacpi_u32 *out_value) {
+    *out_value = ind((size_t)handle + offset);
+    return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_io_write8(uacpi_handle, uacpi_size offset, uacpi_u8 in_value) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_io_write8(uacpi_handle handle, uacpi_size offset, uacpi_u8 in_value) {
+    outb((size_t)handle + offset, in_value);
+    return UACPI_STATUS_OK;
 }
-uacpi_status uacpi_kernel_io_write16(uacpi_handle, uacpi_size offset, uacpi_u16 in_value) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_io_write16(uacpi_handle handle, uacpi_size offset, uacpi_u16 in_value) {
+    outw((size_t)handle + offset, in_value);
+    return UACPI_STATUS_OK;
 }
-uacpi_status uacpi_kernel_io_write32(uacpi_handle, uacpi_size offset, uacpi_u32 in_value) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_io_write32(uacpi_handle handle, uacpi_size offset, uacpi_u32 in_value) {
+    outd((size_t)handle + offset, in_value);
+    return UACPI_STATUS_OK;
 }
+#else
+#endif
 
 void *uacpi_kernel_map(uacpi_phys_addr paddr, uacpi_size len) {
-    logkf(LOG_DEBUG, "uacpi_kernel_map(0x%{u64;x}, 0x%{size;x})", paddr, len);
     size_t off  = paddr % MEMMAP_PAGE_SIZE;
     len        += paddr % MEMMAP_PAGE_SIZE;
     paddr      -= paddr % MEMMAP_PAGE_SIZE;
@@ -96,14 +111,6 @@ void *uacpi_kernel_map(uacpi_phys_addr paddr, uacpi_size len) {
         len += MEMMAP_PAGE_SIZE - len % MEMMAP_PAGE_SIZE;
     }
     size_t vaddr = memprotect_alloc_vaddr(len);
-    logkf(
-        LOG_DEBUG,
-        "memprotect_k(0x%{size;x}, 0x%{size;x}, 0x%{size;x}, 0x%{u32;x})",
-        vaddr,
-        paddr,
-        len,
-        MEMPROTECT_FLAG_RW
-    );
     assert_always(memprotect_k(vaddr, paddr, len, MEMPROTECT_FLAG_RW));
     return (void *)(vaddr + off);
 }
@@ -115,7 +122,6 @@ void uacpi_kernel_unmap(void *addr, uacpi_size len) {
         len += MEMMAP_PAGE_SIZE - len % MEMMAP_PAGE_SIZE;
     }
     assert_always(memprotect_k(vaddr, 0, len, 0));
-    memprotect_alloc_vaddr(vaddr);
 }
 
 /*
@@ -194,7 +200,7 @@ uacpi_handle uacpi_kernel_create_mutex(void) {
     mutex_t *mutex = calloc(1, sizeof(mutex_t));
     if (!mutex)
         return NULL;
-    mutex_init(NULL, mutex, false, false);
+    mutex_init(NULL, mutex, false);
     return mutex;
 }
 
@@ -206,12 +212,16 @@ void uacpi_kernel_free_mutex(uacpi_handle handle) {
 /*
  * Create/free an opaque kernel (semaphore-like) event object.
  */
-uacpi_handle uacpi_kernel_create_event(void) {
-    logk(LOG_WARN, "uACPI wants a semaphore but semaphores are unsupported");
-    return NULL;
+uacpi_handle uacpi_kernel_create_event() {
+    sem_t *sem = malloc(sizeof(sem_t));
+    sem_init(sem);
+    return sem;
 }
 
-void uacpi_kernel_free_event(uacpi_handle) {
+void uacpi_kernel_free_event(uacpi_handle handle) {
+    sem_t *sem = handle;
+    sem_destroy(sem);
+    free(sem);
 }
 
 /*
@@ -239,8 +249,9 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void) {
  *                           calls with timeout=0)
  * 3. Any other value - signifies a host internal error and is treated as such
  */
-uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout) {
-    return mutex_acquire(NULL, handle, timeout * 1000) ? UACPI_STATUS_OK : UACPI_STATUS_INTERNAL_ERROR;
+uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout0) {
+    timestamp_us_t timeout = timeout0 == 0xffff ? TIMESTAMP_US_MAX : timeout0 * 1000;
+    return mutex_acquire(NULL, handle, timeout) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
 }
 
 void uacpi_kernel_release_mutex(uacpi_handle handle) {
@@ -255,9 +266,9 @@ void uacpi_kernel_release_mutex(uacpi_handle handle) {
  *
  * A successful wait is indicated by returning UACPI_TRUE.
  */
-uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle, uacpi_u16) {
-    logkf(LOG_FATAL, "uACPI requested to wait for semaphore but semaphores are unsupported");
-    panic_abort();
+uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout0) {
+    timestamp_us_t timeout = timeout0 == 0xffff ? TIMESTAMP_US_MAX : timeout0 * 1000;
+    return sem_await(handle, timeout) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
 }
 
 /*
@@ -265,17 +276,15 @@ uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle, uacpi_u16) {
  *
  * This function may be used in interrupt contexts.
  */
-void uacpi_kernel_signal_event(uacpi_handle) {
-    logkf(LOG_FATAL, "uACPI requested to signal semaphore but semaphores are unsupported");
-    panic_abort();
+void uacpi_kernel_signal_event(uacpi_handle handle) {
+    sem_post(handle);
 }
 
 /*
  * Reset the event counter to 0.
  */
-void uacpi_kernel_reset_event(uacpi_handle) {
-    logkf(LOG_FATAL, "uACPI requested to reset semaphore but semaphores are unsupported");
-    panic_abort();
+void uacpi_kernel_reset_event(uacpi_handle handle) {
+    sem_reset(handle);
 }
 
 /*
@@ -297,6 +306,11 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req) {
     }
 }
 
+static void uacpi_isr_wrapper(int irq, void *_cookie) {
+    void **cookie = _cookie;
+    ((uacpi_interrupt_handler)cookie[0])(cookie[1]);
+}
+
 /*
  * Install an interrupt handler at 'irq', 'ctx' is passed to the provided
  * handler for every invocation.
@@ -305,17 +319,25 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req) {
  * refer to this handler from other API.
  */
 uacpi_status uacpi_kernel_install_interrupt_handler(
-    uacpi_u32 irq, uacpi_interrupt_handler, uacpi_handle ctx, uacpi_handle *out_irq_handle
+    uacpi_u32 irq, uacpi_interrupt_handler isr, uacpi_handle ctx, uacpi_handle *out_irq_handle
 ) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+    void **cookie   = malloc(3 * sizeof(void *));
+    cookie[0]       = isr;
+    cookie[1]       = ctx;
+    cookie[2]       = isr_install(irq, uacpi_isr_wrapper, cookie);
+    *out_irq_handle = cookie;
+    return UACPI_STATUS_OK;
 }
 
 /*
  * Uninstall an interrupt handler. 'irq_handle' is the value returned via
  * 'out_irq_handle' during installation.
  */
-uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler, uacpi_handle irq_handle) {
-    return UACPI_STATUS_UNIMPLEMENTED;
+uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler isr, uacpi_handle irq_handle) {
+    void **cookie = irq_handle;
+    isr_remove(cookie[2]);
+    free(cookie);
+    return UACPI_STATUS_OK;
 }
 
 /*

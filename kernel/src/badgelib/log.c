@@ -52,9 +52,7 @@ void logk_prefix(log_level_t level) {
 
 static bool putccb(char const *msg, size_t len, void *cookie) {
     (void)cookie;
-    for (size_t i = 0; i < len; i++) {
-        rawputc(msg[i]);
-    }
+    rawprint_substr(msg, len);
     return true;
 }
 
@@ -74,7 +72,13 @@ void logkf(log_level_t level, char const *msg, ...) {
     logk_prefix(level);
     va_list vararg;
     va_start(vararg, msg);
-    format_str_va(msg, cstr_length(msg), putccb, NULL, vararg);
+    size_t msg_len = cstr_length(msg);
+    if (msg_len >= 2 && msg[msg_len - 2] == '\r' && msg[msg_len - 1] == '\n')
+        msg_len -= 2;
+    if (msg_len && msg[msg_len - 1] == '\n') {
+        msg_len--;
+    }
+    format_str_va(msg, msg_len, putccb, NULL, vararg);
     va_end(vararg);
     rawprint(term);
     if (acq)
@@ -99,7 +103,13 @@ void logk_hexdump_vaddr(log_level_t level, char const *msg, void const *data, si
 // Print an unformatted message.
 void logk_from_isr(log_level_t level, char const *msg) {
     logk_prefix(level);
-    rawprint(msg);
+    size_t msg_len = cstr_length(msg);
+    if (msg_len >= 2 && msg[msg_len - 2] == '\r' && msg[msg_len - 1] == '\n')
+        msg_len -= 2;
+    if (msg_len && msg[msg_len - 1] == '\n') {
+        msg_len--;
+    }
+    rawprint_substr(msg, msg_len);
     rawprint(term);
 }
 
@@ -125,9 +135,14 @@ void logk_hexdump_from_isr(log_level_t level, char const *msg, void const *data,
 // Print a hexdump, override the address shown (usually for debug purposes).
 void logk_hexdump_vaddr_from_isr(log_level_t level, char const *msg, void const *data, size_t size, size_t vaddr) {
     logk_prefix(level);
-    rawprint(msg);
+    size_t msg_len = cstr_length(msg);
+    if (msg_len >= 2 && msg[msg_len - 2] == '\r' && msg[msg_len - 1] == '\n')
+        msg_len -= 2;
+    if (msg_len && msg[msg_len - 1] == '\n') {
+        msg_len--;
+    }
+    rawprint_substr(msg, msg_len);
     rawputc('\r');
-    rawputc('\n');
 
     uint8_t const *ptr = data;
     for (size_t y = 0; y * LOGK_HEXDUMP_COLS < size; y++) {

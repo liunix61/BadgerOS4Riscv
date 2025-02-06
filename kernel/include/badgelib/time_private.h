@@ -5,18 +5,6 @@
 
 #include "time.h"
 
-// Timer callback.
-typedef struct {
-    // Timer task no.
-    int64_t        taskno;
-    // Timestamp to run callback at.
-    timestamp_us_t timestamp;
-    // Timer callback function.
-    timer_fn_t     callback;
-    // Cookie for timer callback function.
-    void          *cookie;
-} timertask_t;
-
 // Time CPU-local data.
 typedef struct {
     // Whether the timer is set for preemption instead of timer callback.

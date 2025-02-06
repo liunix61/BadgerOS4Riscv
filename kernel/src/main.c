@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "assertions.h"
+#include "attributes.h"
 #include "filesystem.h"
 #include "housekeeping.h"
 #include "interrupt.h"

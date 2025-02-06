@@ -9,6 +9,7 @@
 #include "list.h"
 #include "process/process.h"
 #include "scheduler.h"
+#include "spinlock.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -56,12 +57,6 @@
 // The scheduler is pending exit on this CPU.
 #define SCHED_EXITING  (1 << 2)
 
-// Things a thread can be blocked on.
-typedef enum {
-    // Thread is blocked on a `mutex_t`.
-    THREAD_BLOCK_MUTEX,
-} thread_block_t;
-
 // Thread struct.
 struct sched_thread_t {
     // Thread queue link.
@@ -79,21 +74,13 @@ struct sched_thread_t {
     timeusage_t timeusage;
 
     // Thread flags.
-    atomic_int     flags;
+    atomic_int flags;
+    // CPU this thread is to be resumed on when unblocked.
+    int        unblock_cpu;
     // Exit code from `thread_exit`
-    int            exit_code;
-    // Cause for the thread to block. Only valid if THREAD_BLOCKED flag is set.
-    thread_block_t blocked_by;
-    // Information for the object the thread is blocking on.
-    union {
-        // Info for threads blocked on a mutex.
-        struct {
-            // Pointer to blocking mutex.
-            mutex_t *mutex;
-            // Timer ID used by mutex timeout code.
-            int64_t  timer_id;
-        } mutex;
-    } blocking_obj;
+    int        exit_code;
+    // Current blocking ticket; unblocking with a lower ticks does nothing.
+    uint64_t   blocking_ticket;
 
     // ISR context for threads running in kernel mode.
     isr_ctx_t kernel_isr_ctx;
@@ -109,9 +96,9 @@ struct sched_thread_t {
 // CPU-local scheduler data.
 struct sched_cpulocal_t {
     // Scheduler start/stop mutex.
-    mutex_t        run_mtx;
+    spinlock_t     run_lock;
     // Incoming threads list mutex.
-    mutex_t        incoming_mtx;
+    spinlock_t     incoming_lock;
     // Threads pending handover to this CPU.
     dlist_t        incoming;
     // CPU-local thread queue.

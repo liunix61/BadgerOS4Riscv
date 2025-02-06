@@ -19,7 +19,7 @@ static spinlock_t tasks_spinlock = SPINLOCK_T_INIT_SHARED;
 // Length of timer tasks array.
 static size_t        tasks_len;
 // Capacity of timer tasks array.
-static size_t        tasks_cap;
+static size_t const  tasks_cap = 2048;
 // Global timer tasks array.
 static timertask_t **tasks;
 
@@ -80,32 +80,26 @@ void time_set_next_task_switch(timestamp_us_t timestamp) {
 
 // Attach a task to a timer interrupt.
 // The task with the lowest timestamp is likeliest, but not guaranteed, to run first.
-// Returns timer ID on success, -1 on failure.
-int64_t time_add_async_task(timestamp_us_t timestamp, timer_fn_t callback, void *cookie) {
-    // Allocate timer task.
-    timertask_t *task = malloc(sizeof(timertask_t));
-    if (!task) {
-        return -1;
-    }
-    spinlock_take(&tasks_spinlock);
-    int64_t taskno = taskno_counter;
-    taskno_counter++;
-    spinlock_release(&tasks_spinlock);
-    task->taskno    = taskno;
-    task->timestamp = timestamp;
-    task->callback  = callback;
-    task->cookie    = cookie;
-
+// Returns whether the task was successfully added.
+bool time_add_async_task(timertask_t *task) {
     // Interrupts must be disabled while holding spinlock.
     bool ie = irq_disable();
+
+    // Allocate a tack number.
+    spinlock_take(&tasks_spinlock);
+    task->taskno = taskno_counter++;
+    spinlock_release(&tasks_spinlock);
+
 
     // Take spinlock while inserting into the list.
     spinlock_take(&tasks_spinlock);
 
     // Insert into task array.
-    if (!array_lencap_sorted_insert(&tasks, sizeof(void *), &tasks_len, &tasks_cap, &task, timertask_timestamp_cmp)) {
+    if (tasks_len >= tasks_cap) {
         goto error;
     }
+    array_sorted_insert(&tasks, sizeof(timertask_t *), tasks_len, &task, timertask_timestamp_cmp);
+    tasks_len++;
 
     // Release spinlock so it can be re-taken as shared in `eval_cpu_timer`.
     spinlock_release(&tasks_spinlock);
@@ -116,14 +110,13 @@ int64_t time_add_async_task(timestamp_us_t timestamp, timer_fn_t callback, void 
 
     // Re-enable interrupts because we're done with the spinlocks.
     irq_enable_if(ie);
-    return taskno;
+    return true;
 
 error:
     // Failed to insert into array.
     spinlock_release(&tasks_spinlock);
     irq_enable_if(ie);
-    free(task);
-    return -1;
+    return false;
 }
 
 // Cancel a task created with `time_add_async_task`.
@@ -138,10 +131,7 @@ bool time_cancel_async_task(int64_t taskno) {
     for (size_t i = 0; i < tasks_len; i++) {
         if (tasks[i]->taskno == taskno) {
             found = true;
-            timertask_t *task;
-            array_lencap_remove(&tasks, sizeof(void *), &tasks_len, &tasks_cap, &task, i);
-            // NOLINTNEXTLINE
-            free(task);
+            array_lencap_remove(&tasks, sizeof(void *), &tasks_len, &tasks_cap, NULL, i);
             break;
         }
     }
@@ -160,6 +150,7 @@ bool time_cancel_async_task(int64_t taskno) {
 
 // Generic timer init after timer-specific init.
 void time_init_generic() {
+    tasks = malloc(tasks_cap * sizeof(timertask_t *));
 }
 
 // Callback from timer-specific code when the CPU timer fires.
@@ -172,21 +163,18 @@ void time_cpu_timer_isr() {
         sched_request_switch_from_isr();
 
     } else {
-        timertask_t *task;
+        timertask_t *task = NULL;
 
         // Check if there is a task that needs to run right now.
         spinlock_take(&tasks_spinlock);
         if (tasks_len && now >= tasks[tasks_len - 1]->timestamp) {
             task = tasks[--tasks_len];
-        } else {
-            task = NULL;
         }
         spinlock_release(&tasks_spinlock);
 
         // Run the task, if any.
         if (task) {
             task->callback(task->cookie);
-            free(task);
         }
     }
 

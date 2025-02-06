@@ -50,7 +50,7 @@ clean-image:
 qemu-debug: image
 	$(QEMU) -s -S \
 		-d int -no-reboot -no-shutdown \
-		-smp 1 -m 4G -cpu max \
+		-smp 1 -m 4G -cpu max,tsc-frequency=1000000000 \
 		-device pcie-root-port,bus=pci.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-device virtio-scsi-pci,id=scsi \
@@ -61,7 +61,7 @@ qemu-debug: image
 .PHONY: qemu
 qemu: image
 	$(QEMU) -s \
-		-smp 1 -m 4G -cpu max \
+		-smp 1 -m 4G -cpu max,tsc-frequency=1000000000 \
 		-device pcie-root-port,bus=pci.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-device virtio-scsi-pci,id=scsi \

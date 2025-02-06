@@ -431,13 +431,11 @@ size_t memprotect_alloc_vaddr(size_t len) {
         array_lencap_remove(&vmm_free, sizeof(vmm_info_t), &vmm_free_len, &vmm_free_cap, NULL, i);
     }
     mutex_release(NULL, &vmm_mtx);
-    logkf(LOG_DEBUG, "memprotect_alloc_vaddr(0x%{size;x}) = 0x%{size;x}", len, (range.vpn + 1) * MEMMAP_PAGE_SIZE);
     return (range.vpn + 1) * MEMMAP_PAGE_SIZE;
 }
 
 // Free a virtual address range allocated with `memprotect_alloc_vaddr`.
 void memprotect_free_vaddr(size_t vaddr) {
-    logkf(LOG_DEBUG, "memprotect_free_vaddr(0x%{size;x})", vaddr);
     assert_always(vaddr % MEMMAP_PAGE_SIZE == 0);
     size_t vpn = vaddr / MEMMAP_PAGE_SIZE - 1;
     mutex_acquire(NULL, &vmm_mtx, TIMESTAMP_US_MAX);

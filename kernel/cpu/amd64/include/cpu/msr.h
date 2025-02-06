@@ -4,6 +4,8 @@
 #pragma once
 
 #ifndef __ASSEMBLER__
+#include "attributes.h"
+
 #include <stdint.h>
 #endif
 
@@ -57,7 +59,7 @@ typedef union {
 
 #ifndef __ASSEMBLER__
 // Read an MSR.
-__attribute__((always_inline)) static inline uint64_t msr_read(uint32_t address) {
+FORCEINLINE static inline uint64_t msr_read(uint32_t address) {
     uint32_t addr = address;
     uint32_t lo;
     uint32_t hi;
@@ -66,7 +68,7 @@ __attribute__((always_inline)) static inline uint64_t msr_read(uint32_t address)
 }
 
 // Write an MSR.
-__attribute__((always_inline)) static inline void msr_write(uint32_t address, uint64_t value) {
+FORCEINLINE static inline void msr_write(uint32_t address, uint64_t value) {
     uint32_t addr = address;
     uint32_t lo   = value;
     uint32_t hi   = value >> 32;
