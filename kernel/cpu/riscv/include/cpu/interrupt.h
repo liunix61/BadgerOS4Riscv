@@ -38,5 +38,5 @@ static inline bool irq_disable() {
 static inline bool irq_is_enabled() {
     long mask;
     asm("csrr %0, " CSR_STATUS_STR : "=r"(mask));
-    return (mask >> CSR_STATUS_PP_BASE_BIT) & 1;
+    return (mask >> CSR_STATUS_IE_BIT) & 1;
 }

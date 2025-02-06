@@ -604,11 +604,11 @@ tid_t thread_new_kernel(badge_err_t *ec, char const *name, sched_entry_t entrypo
     thread->flags                 |= THREAD_PRIVILEGED | THREAD_KERNEL;
     sched_prepare_kernel_entry(thread, entrypoint, arg);
 
-    irq_disable();
+    bool ie = irq_disable();
     spinlock_take(&threads_lock);
     bool success = array_lencap_insert(&threads, sizeof(void *), &threads_len, &threads_cap, &thread, threads_len);
     spinlock_release(&threads_lock);
-    irq_enable();
+    irq_enable_if(ie);
     if (!success) {
         if (thread->name) {
             free(thread->name);
@@ -783,8 +783,8 @@ static bool thread_try_mark_running(sched_thread_t *thread, bool now) {
 }
 
 // Resumes a previously suspended thread or starts it.
-static void thread_resume_impl(badge_err_t *ec, tid_t tid, bool now, bool from_isr) {
-    irq_disable_if(!from_isr);
+static void thread_resume_impl(badge_err_t *ec, tid_t tid, bool now) {
+    bool ie = irq_disable();
     spinlock_take_shared(&threads_lock);
     sched_thread_t *thread = find_thread(tid);
     if (thread) {
@@ -796,29 +796,31 @@ static void thread_resume_impl(badge_err_t *ec, tid_t tid, bool now, bool from_i
         badge_err_set(ec, ELOC_THREADS, ECAUSE_NOTFOUND);
     }
     spinlock_release_shared(&threads_lock);
-    irq_enable_if(!from_isr);
+    irq_enable_if(ie);
 }
 
 // Resumes a previously suspended thread or starts it.
 void thread_resume(badge_err_t *ec, tid_t tid) {
-    thread_resume_impl(ec, tid, false, false);
+    thread_resume_impl(ec, tid, false);
 }
 
 // Resumes a previously suspended thread or starts it.
 // Immediately schedules the thread instead of putting it in the queue first.
 void thread_resume_now(badge_err_t *ec, tid_t tid) {
-    thread_resume_impl(ec, tid, true, false);
+    thread_resume_impl(ec, tid, true);
 }
 
 // Resumes a previously suspended thread or starts it from an ISR.
 void thread_resume_from_isr(badge_err_t *ec, tid_t tid) {
-    thread_resume_impl(ec, tid, false, true);
+    assert_dev_drop(!irq_is_enabled());
+    thread_resume_impl(ec, tid, false);
 }
 
 // Resumes a previously suspended thread or starts it from an ISR.
 // Immediately schedules the thread instead of putting it in the queue first.
 void thread_resume_now_from_isr(badge_err_t *ec, tid_t tid) {
-    thread_resume_impl(ec, tid, true, true);
+    assert_dev_drop(!irq_is_enabled());
+    thread_resume_impl(ec, tid, true);
 }
 
 // Returns whether a thread is running; it is neither suspended nor has it exited.

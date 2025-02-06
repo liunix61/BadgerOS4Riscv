@@ -211,6 +211,7 @@ void port_init() {
     } else
 #endif
     {
+#ifdef PORT_ENABLE_ACPI
         // Initialize ACPI.
         time_init_before_acpi();
         uacpi_status st = uacpi_initialize(0);
@@ -219,6 +220,7 @@ void port_init() {
         assert_always(st == UACPI_STATUS_OK);
         // st = uacpi_namespace_initialize();
         // assert_always(st == UACPI_STATUS_OK);
+#endif
     }
 
     // Reclaim all reclaimable memory.

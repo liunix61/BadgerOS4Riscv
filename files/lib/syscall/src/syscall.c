@@ -16,7 +16,7 @@
 #define SYSCALL_DEF(num, enum, name, returns, ...)                                                                     \
     returns name(__VA_ARGS__) __attribute__((naked));                                                                  \
     returns name(__VA_ARGS__) {                                                                                        \
-        asm("mov rax, " #num "; mov r10, rcx; syscall; ret");                                                          \
+        asm("mov $" #num ", %rax; mov %rcx, %r10; syscall; ret");                                                      \
     }
 #endif
 
