@@ -6,6 +6,7 @@
 #include "assertions.h"
 #include "backtrace.h"
 #include "badge_strings.h"
+#include "cpulocal.h"
 #include "isr_ctx.h"
 #include "log.h"
 #include "process/internal.h"

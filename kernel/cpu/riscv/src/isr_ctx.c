@@ -4,6 +4,7 @@
 #include "isr_ctx.h"
 
 #include "badge_strings.h"
+#include "cpulocal.h"
 #include "interrupt.h"
 #include "rawprint.h"
 

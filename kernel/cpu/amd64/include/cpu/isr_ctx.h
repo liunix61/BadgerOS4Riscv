@@ -3,19 +3,17 @@
 
 #pragma once
 
-#include "cpu/msr.h"
+#include "cpu/x86_msr.h"
 #include "cpu/regs.h"
 
 #ifndef __ASSEMBLER__
-#include "cpulocal.h"
-#include "log.h"
-#include "memprotect.h"
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+typedef struct mpu_ctx_t      mpu_ctx_t;
 typedef struct sched_thread_t sched_thread_t;
 typedef struct isr_ctx_t      isr_ctx_t;
+typedef struct cpulocal_t     cpulocal_t;
 // Custom trap handler callback, returns true if the trap was suppressed.
 typedef bool (*isr_noexc_cb_t)(isr_ctx_t *ctx, void *cookie);
 #endif
@@ -75,6 +73,8 @@ STRUCT_FIELD_STRUCT(isr_ctx_t, isr_noexc_cb_t, noexc_cb, 8)
 STRUCT_FIELD_PTR(isr_ctx_t, void, noexc_cookie)
 // Pointer to CPU-local struct.
 STRUCT_FIELD_PTR(isr_ctx_t, cpulocal_t, cpulocal)
+// Stack to use for syscalls.
+STRUCT_FIELD_QWORD(isr_ctx_t, syscall_stack)
 STRUCT_END(isr_ctx_t)
 
 // `isr_ctx_t` flag: Is a kernel thread.
@@ -88,6 +88,8 @@ STRUCT_END(isr_ctx_t)
 
 
 #ifndef __ASSEMBLER__
+#include "cpulocal.h"
+#include "memprotect.h"
 
 // Stack alignment is defined to be 16 by the SYSV calling convention
 #define STACK_ALIGNMENT 16

@@ -129,6 +129,7 @@ size_t proc_map_raw(
             badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
             goto error;
         }
+        logkf(LOG_INFO, "Mapped %{size;d} bytes at %{size;x} to process %{d}", new_ent.size, new_ent.vaddr, proc->pid);
         i += alloc;
     }
 
@@ -147,7 +148,7 @@ void proc_unmap_raw(badge_err_t *ec, process_t *proc, size_t base) {
         if (map->regions[i].vaddr == base) {
             // Remove region entry.
             proc_memmap_ent_t region = map->regions[i];
-            array_remove(&map->regions[0], sizeof(map->regions[0]), map->regions_len, NULL, i);
+            array_remove(map->regions, sizeof(proc_memmap_ent_t), map->regions_len, NULL, i);
             map->regions_len--;
 
             // Revoke user access to the memory.

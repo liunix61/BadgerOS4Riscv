@@ -192,16 +192,17 @@ void sched_prepare_user_entry(sched_thread_t *thread, size_t entry_point, size_t
     thread->kernel_isr_ctx.regs.ss     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
     thread->kernel_isr_ctx.regs.rflags = RFLAGS_AC;
     mem_set(&thread->user_isr_ctx.regs, 0, sizeof(thread->user_isr_ctx.regs));
-    thread->user_isr_ctx.regs.gsbase = (size_t)&thread->user_isr_ctx;
-    thread->user_isr_ctx.regs.rip    = entry_point;
-    thread->user_isr_ctx.regs.rsp    = thread->kernel_stack_top;
-    thread->user_isr_ctx.regs.cs     = FORMAT_SEGMENT(SEGNO_UCODE, 0, PRIV_USER);
-    thread->user_isr_ctx.regs.ds     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
-    thread->user_isr_ctx.regs.es     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
-    thread->user_isr_ctx.regs.fs     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
-    thread->user_isr_ctx.regs.gs     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
-    thread->user_isr_ctx.regs.ss     = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
-    thread->user_isr_ctx.regs.rflags = PRIV_USER << RFLAGS_IOPL_BASE;
+    thread->user_isr_ctx.regs.gsbase   = (size_t)&thread->user_isr_ctx;
+    thread->user_isr_ctx.regs.rip      = entry_point;
+    thread->user_isr_ctx.regs.rsp      = thread->kernel_stack_top;
+    thread->user_isr_ctx.regs.cs       = FORMAT_SEGMENT(SEGNO_UCODE, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.ds       = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.es       = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.fs       = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.gs       = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.ss       = FORMAT_SEGMENT(SEGNO_UDATA, 0, PRIV_USER);
+    thread->user_isr_ctx.regs.rflags   = PRIV_USER << RFLAGS_IOPL_BASE;
+    thread->user_isr_ctx.syscall_stack = thread->kernel_stack_top;
 }
 
 // Run arch-specific task switch code before `isr_context_switch`.

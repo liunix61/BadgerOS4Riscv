@@ -55,7 +55,7 @@ qemu-debug: image
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-device virtio-scsi-pci,id=scsi \
 		-drive id=hd0,format=raw,file=$(OUTPUT)/image.hdd \
-		-debugcon stdio -display none \
+		-serial mon:stdio -display none \
 	| ../tools/address-filter.py -L -A $(CROSS_COMPILE)addr2line $(OUTPUT)/badger-os.elf
 
 .PHONY: qemu
@@ -66,5 +66,5 @@ qemu: image
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-device virtio-scsi-pci,id=scsi \
 		-drive id=hd0,format=raw,file=$(OUTPUT)/image.hdd \
-		-debugcon stdio -display none \
+		-serial mon:stdio -display none \
 	| ../tools/address-filter.py -L -A $(CROSS_COMPILE)addr2line $(OUTPUT)/badger-os.elf

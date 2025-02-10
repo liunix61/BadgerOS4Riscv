@@ -51,6 +51,9 @@ static void set_timer_ticks(uint64_t timestamp) {
 
 // Set the CPU's timer to a certain timestamp.
 void time_set_cpu_timer(timestamp_us_t timestamp) {
+    if (!ticks_per_sec) {
+        return;
+    }
     set_timer_ticks(timestamp * ticks_per_sec / 1000000);
     asm("csrs sie, %0" ::"r"(1 << RISCV_INT_SUPERVISOR_TIMER));
 }

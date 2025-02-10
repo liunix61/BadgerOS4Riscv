@@ -15,7 +15,7 @@
 #include "uacpi/kernel_api.h"
 
 #ifdef CONFIG_CPU_amd64
-#include "cpu/ioport.h"
+#include "cpu/x86_ioport.h"
 #endif
 
 
@@ -268,7 +268,7 @@ void uacpi_kernel_release_mutex(uacpi_handle handle) {
  */
 uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout0) {
     timestamp_us_t timeout = timeout0 == 0xffff ? TIMESTAMP_US_MAX : timeout0 * 1000;
-    return sem_await(handle, timeout) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
+    return sem_await(handle, timeout);
 }
 
 /*

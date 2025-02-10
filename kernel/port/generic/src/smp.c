@@ -6,6 +6,7 @@
 #include "arrays.h"
 #include "assertions.h"
 #include "cpu/mmu.h"
+#include "cpulocal.h"
 #include "interrupt.h"
 #include "isr_ctx.h"
 #include "mutex.h"
@@ -104,8 +105,8 @@ static REQ struct limine_smp_request smp_req = {
 // Initialise the SMP subsystem.
 void smp_init_dtb(dtb_handle_t *dtb) {
 #ifdef __riscv
-    sbi_ret_t res = sbi_probe_extension(SBI_HART_MGMT_EID);
-    sbi_supports_hsm == res.retval && !res.status;
+    sbi_ret_t res    = sbi_probe_extension(SBI_HART_MGMT_EID);
+    sbi_supports_hsm = res.retval && !res.status;
     if (sbi_supports_hsm) {
         // SBI supports HSM; CPUs can be started and stopped.
         logk(LOG_DEBUG, "SBI supports HSM");
@@ -225,7 +226,7 @@ size_t smp_get_cpuid(int cpu) {
 
 
 // First stage entrypoint for secondary CPUs.
-static NAKED void cpu1_init0_limine(__attribute__((used)) struct limine_smp_info *info) {
+static NAKED void cpu1_init0_limine(struct limine_smp_info *info) {
     // clang-format off
 #ifdef __riscv
     asm(
@@ -241,17 +242,14 @@ static NAKED void cpu1_init0_limine(__attribute__((used)) struct limine_smp_info
 }
 
 // Second stage entrypoint for secondary CPUs.
-static void cpu1_init1_limine(struct limine_smp_info *info) {
+__attribute__((unused)) static void cpu1_init1_limine(struct limine_smp_info *info) {
     int       cur_cpu       = (int)info->extra_argument;
     isr_ctx_t tmp_ctx       = {0};
     tmp_ctx.flags           = ISR_CTX_FLAG_KERNEL;
     tmp_ctx.cpulocal        = &cpu_status[cur_cpu].cpulocal;
     tmp_ctx.cpulocal->cpuid = info->smp_resp_procid;
     tmp_ctx.cpulocal->cpu   = cur_cpu;
-#ifdef __riscv
-    asm("csrw sscratch, %0" ::"r"(&tmp_ctx));
-#elif defined(__x86_64__)
-#endif
+    irq_init(&tmp_ctx);
     cpu_status[cur_cpu].entrypoint();
     __builtin_trap();
 }

@@ -4,9 +4,10 @@
 #include "interrupt.h"
 
 #include "cpu/isr.h"
-#include "cpu/msr.h"
 #include "cpu/priv_level.h"
 #include "cpu/segmentation.h"
+#include "cpu/x86_cpuid.h"
+#include "cpu/x86_msr.h"
 #include "cpulocal.h"
 
 
@@ -90,34 +91,27 @@ void x86_reload_segments() {
 // BSP TSS.
 static uint8_t bsp_tss[TSS_SIZE];
 
-// BSP CPU-local data.
-static cpulocal_t bsp_cpulocal = {
-    .arch.tss = &bsp_tss,
-};
-
-// Temporary interrupt context before scheduler.
-static isr_ctx_t tmp_ctx = {
-    .flags       = ISR_CTX_FLAG_KERNEL,
-    .regs.cs     = FORMAT_SEGMENT(SEGNO_KCODE, 0, PRIV_KERNEL),
-    .regs.ss     = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL),
-    .regs.rflags = RFLAGS_AC,
-    .cpulocal    = &bsp_cpulocal,
-};
-
 // Array of IDT handler stubs.
 extern size_t const idt_stubs[];
 // Number of IDT handler stubs.
 extern size_t const idt_stubs_len;
 
 // Initialise interrupt drivers for this CPU.
-void irq_init() {
+void irq_init(isr_ctx_t *tmp_ctx) {
+    tmp_ctx->regs.cs            = FORMAT_SEGMENT(SEGNO_KCODE, 0, PRIV_KERNEL);
+    tmp_ctx->regs.ss            = FORMAT_SEGMENT(SEGNO_KDATA, 0, PRIV_KERNEL);
+    tmp_ctx->regs.rflags        = RFLAGS_AC;
+    // TODO: Create GDT and TSS for secondary CPUs.
+    // There should probably be a global func/var that queries current boot stage to help with this.
+    tmp_ctx->cpulocal->arch.tss = &bsp_tss;
+
     // TODO: Fill in addresses for TSS entry.
     // Set up GDT for booting CPU.
     x86_setup_gdt();
     x86_reload_segments();
 
     // Fill in the TSS address, which isn't possible at compile time.
-    size_t tss_addr  = (size_t)&bsp_tss;
+    size_t tss_addr  = (size_t)tmp_ctx->cpulocal->arch.tss;
     bsp_gdt[6]      |= GDT_BASE(tss_addr) | GDT_LIMIT(TSS_SIZE - 1);
     bsp_gdt[7]      |= tss_addr >> 32;
 
@@ -132,8 +126,23 @@ void irq_init() {
     x86_setup_idt();
 
     // Set GSBASE to the address of the ISR context.
-    msr_write(MSR_GSBASE, (uint64_t)&tmp_ctx);
-    msr_write(MSR_KGSBASE, (uint64_t)&tmp_ctx);
+    msr_write(MSR_GSBASE, (uint64_t)tmp_ctx);
+    msr_write(MSR_KGSBASE, (uint64_t)tmp_ctx);
+
+    // Set up fast syscall entrypoint.
+    void amd64_syscall_entry();
+    msr_write(MSR_LSTAR, (size_t)amd64_syscall_entry);
+
+    // Mask out interrupt enable and IOPL.
+    msr_write(MSR_FMASK, (1 << 9) | (3 << 12));
+
+    // Set segment selectors for CS and SS.
+    msr_write(MSR_STAR, (uint64_t)FORMAT_SEGMENT(SEGNO_KCODE, 0, PRIV_KERNEL) << 32);
+
+    // Enable fast syscall instruction.
+    msr_efer_t efer = {.val = msr_read(MSR_EFER)};
+    efer.sce        = 1;
+    msr_write(MSR_EFER, efer.val);
 }
 
 

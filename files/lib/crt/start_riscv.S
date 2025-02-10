@@ -24,12 +24,12 @@ _start:
     la a1, sigret_trampoline
     jal syscall_proc_sighandler
     
-    # TODO: argc and argv
+    # TODO: argc and argv.
     
-    # Jump to main function
+    # Call main function.
     jal main
     
-    # Exit the process if main returns
+    # Run exit syscall if main returns.
     li a7, SYSCALL_PROC_EXIT
     ecall
 

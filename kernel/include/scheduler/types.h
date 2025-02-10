@@ -16,8 +16,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-
-
 // The minimum time a thread will run. `SCHED_PRIO_LOW` maps to this.
 #define SCHED_MIN_US        5000
 // The time quota increment per increased priority.

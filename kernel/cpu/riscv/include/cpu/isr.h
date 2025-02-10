@@ -33,8 +33,6 @@ extern void           riscv_interrupt_handler();
 extern void           riscv_syscall_wrapper();
 // Callback from ASM on non-syscall trap.
 extern void           riscv_trap_handler();
-// Return a value from the syscall handler.
-extern void           syscall_return(long long value) __attribute__((noreturn));
 
 // Explicit context switch from kernel.
 // Interrupts must be disabled on entry and will be re-enabled on exit.

@@ -35,8 +35,8 @@ typedef struct {
 } mutex_waiting_entry_t;
 
 #define MUTEX_FAST_LOOPS    256
-#define MUTEX_T_INIT        ((mutex_t){0, 0, ATOMIC_FLAG_INIT, 0, {0}})
-#define MUTEX_T_INIT_SHARED ((mutex_t){1, 0, ATOMIC_FLAG_INIT, 0, {0}})
+#define MUTEX_T_INIT        ((mutex_t){0, ATOMIC_FLAG_INIT, 0, {0}})
+#define MUTEX_T_INIT_SHARED ((mutex_t){1, ATOMIC_FLAG_INIT, 0, {0}})
 
 
 

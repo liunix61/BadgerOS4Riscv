@@ -4,14 +4,14 @@
 #include "mutex.h"
 
 #include "assertions.h"
-#include "cpu/isr.h"
 #include "interrupt.h"
 #include "log.h"
 #include "scheduler/isr.h"
 #include "scheduler/scheduler.h"
 #include "scheduler/types.h"
-#include "smp.h"
 #include "time.h"
+
+#include <stdatomic.h>
 
 // Magic value for exclusive locking.
 #define EXCLUSIVE_MAGIC ((int)__INT_MAX__ / 4)

@@ -51,7 +51,9 @@ void sched_init();
 void sched_start_altcpus();
 // Power on and start scheduler on another CPU.
 bool sched_start_on(int cpu);
-// Start executing the scheduler on this CPU.
+// Prepare a new scheduler context for this or another CPU.
+void sched_init_cpu(int cpu);
+// Start executing the scheduler on this CPU after `sched_init_cpu` was called for this CPU.
 void sched_exec() NORETURN;
 // Exit the scheduler and subsequenty shut down the CPU.
 void sched_exit(int cpu);

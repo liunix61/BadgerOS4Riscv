@@ -3,6 +3,7 @@
 
 #include "assertions.h"
 #include "attributes.h"
+#include "cpulocal.h"
 #include "filesystem.h"
 #include "housekeeping.h"
 #include "interrupt.h"
@@ -12,7 +13,6 @@
 #include "memprotect.h"
 #include "panic.h"
 #include "port/port.h"
-#include "process/internal.h"
 #include "process/process.h"
 #include "scheduler/scheduler.h"
 #include "time.h"
@@ -49,14 +49,20 @@ static void kernel_lifetime_func();
 
 
 
+// CPU-local data of booting CPU.
+static cpulocal_t bsp_cpulocal = {0};
+
 // After control handover, the booting CPU core starts here and other cores wait.
 // This sets up the basics of everything needed by the other systems of the kernel.
 // When finished, the booting CPU will perform kernel initialization.
 void basic_runtime_init() {
-    badge_err_t ec = {0};
+    badge_err_t ec      = {0};
+    isr_ctx_t   tmp_ctx = {0};
+    tmp_ctx.flags       = ISR_CTX_FLAG_KERNEL;
+    tmp_ctx.cpulocal    = &bsp_cpulocal;
 
     // ISR initialization.
-    irq_init();
+    irq_init(&tmp_ctx);
     // Early memory protection initialization.
     memprotect_early_init();
     // Early platform initialization.
@@ -75,6 +81,7 @@ void basic_runtime_init() {
 
     // Global scheduler initialization.
     sched_init();
+    sched_init_cpu(0);
 
     // Housekeeping thread initialization.
     hk_init();

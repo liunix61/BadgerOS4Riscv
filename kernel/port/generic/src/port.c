@@ -7,7 +7,6 @@
 #include "cpu/mmu.h"
 #include "driver/pcie.h"
 #include "interrupt.h"
-#include "isr_ctx.h"
 #include "memprotect.h"
 #include "panic.h"
 #include "port/dtparse.h"
@@ -15,6 +14,9 @@
 #include "rawprint.h"
 #ifdef PORT_ENABLE_ACPI
 #include "uacpi/uacpi.h"
+#endif
+#ifdef __x86_64__
+#include "cpu/x86_ioport.h"
 #endif
 
 #include <stdbool.h>
@@ -257,7 +259,7 @@ void port_init() {
 void port_putc(char msg) {
     // TODO: More proper way to do this.
 #ifdef __x86_64__
-    asm("outb 0xe9, %0" ::"r"(msg));
+    outb(0x3f8, msg);
 #else
     register char a0 asm("a0") = msg;
     // SBI console putchar.

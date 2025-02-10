@@ -4,7 +4,7 @@
 #include "time.h"
 
 #include "assertions.h"
-#include "cpu/ioport.h"
+#include "cpu/x86_ioport.h"
 #include "cpu/x86_cpuid.h"
 #include "interrupt.h"
 #include "port/dtb.h"

@@ -8,6 +8,7 @@
 #include "badge_strings.h"
 #include "config.h"
 #include "cpu/isr.h"
+#include "cpulocal.h"
 #include "housekeeping.h"
 #include "interrupt.h"
 #include "isr_ctx.h"
@@ -26,7 +27,7 @@ static atomic_int        running_sched_count;
 // Number of CPUs ready to perform a load balance.
 static atomic_int        loadbalance_ready_count;
 // CPU-local scheduler structs.
-static sched_cpulocal_t *cpu_ctx;
+static sched_cpulocal_t *cpu_ctx[64];
 // Threads list mutex.
 static spinlock_t        threads_lock = SPINLOCK_T_INIT_SHARED;
 // Number of threads that exist.
@@ -86,7 +87,7 @@ static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
 // Try to hand a thread off to another CPU.
 // The thread must not yet be in any runqueue.
 bool thread_handoff(sched_thread_t *thread, int cpu, bool force, int max_load) {
-    sched_cpulocal_t *info = cpu_ctx + cpu;
+    sched_cpulocal_t *info = cpu_ctx[cpu];
     spinlock_take_shared(&info->run_lock);
 
     int  flags      = atomic_load(&info->flags);
@@ -214,7 +215,7 @@ static void sw_handle_loadbalance(timestamp_us_t now, int cur_cpu, sched_cpuloca
     // Measure global load average.
     int global_load_average = 0;
     for (int i = 0; i < smp_count; i++) {
-        global_load_average += cpu_ctx[i].load_average;
+        global_load_average += cpu_ctx[i]->load_average;
     }
     global_load_average /= atomic_load(&running_sched_count);
 
@@ -248,7 +249,7 @@ static void sw_handle_loadbalance(timestamp_us_t now, int cur_cpu, sched_cpuloca
 void sched_request_switch_from_isr() {
     timestamp_us_t    now     = time_us();
     int               cur_cpu = smp_cur_cpu();
-    sched_cpulocal_t *info    = cpu_ctx + cur_cpu;
+    sched_cpulocal_t *info    = cpu_ctx[cur_cpu];
 
     // Check the exiting flag.
     int sched_fl = atomic_load(&info->flags);
@@ -404,21 +405,6 @@ static void idle_func(void *arg) {
 
 // Global scheduler initialization.
 void sched_init() {
-    cpu_ctx = malloc(smp_count * sizeof(sched_cpulocal_t));
-    assert_always(cpu_ctx);
-    mem_set(cpu_ctx, 0, smp_count * sizeof(sched_cpulocal_t));
-    for (int i = 0; i < smp_count; i++) {
-        cpu_ctx[i].run_lock      = SPINLOCK_T_INIT_SHARED;
-        cpu_ctx[i].incoming_lock = SPINLOCK_T_INIT_SHARED;
-        void *stack              = malloc(8192);
-        assert_always(stack);
-        cpu_ctx[i].idle_thread.kernel_stack_bottom  = (size_t)stack;
-        cpu_ctx[i].idle_thread.kernel_stack_top     = (size_t)stack + 8192;
-        cpu_ctx[i].idle_thread.kernel_isr_ctx.flags = ISR_CTX_FLAG_KERNEL;
-        cpu_ctx[i].idle_thread.flags                = THREAD_PRIVILEGED;
-        sched_prepare_kernel_entry(&cpu_ctx[i].idle_thread, idle_func, NULL);
-    }
-    atomic_thread_fence(memory_order_release);
     hk_add_repeated(0, 1000000, sched_housekeeping, NULL);
 }
 
@@ -435,17 +421,25 @@ void sched_start_altcpus() {
     }
 }
 
+// A combination of `sched_init_cpu` for this CPU and `sched_exec`.
+NORETURN static void sched_init_and_exec() {
+    sched_init_cpu(smp_cur_cpu());
+    sched_exec();
+}
+
 // Power on and start scheduler on another CPU.
 bool sched_start_on(int cpu) {
     static mutex_t start_mutex = MUTEX_T_INIT;
     mutex_acquire(NULL, &start_mutex, TIMESTAMP_US_MAX);
 
     // Tell SMP to power on the other CPU.
+    sched_init_cpu(cpu);
     void *tmp_stack  = malloc(CONFIG_STACK_SIZE);
-    bool  poweron_ok = smp_poweron(cpu, sched_exec, tmp_stack);
+    bool  poweron_ok = smp_poweron(cpu, sched_init_and_exec, tmp_stack + CONFIG_STACK_SIZE);
     if (poweron_ok) {
-        logkf(LOG_INFO, "Started CPU%{d}", cpu);
-        while (!(atomic_load(&cpu_ctx[cpu].flags) & SCHED_RUNNING)) continue;
+        mutex_acquire(NULL, &log_mtx, TIMESTAMP_US_MAX);
+        while (!(atomic_load(&cpu_ctx[cpu]->flags) & SCHED_RUNNING)) continue;
+        mutex_release(NULL, &log_mtx);
     } else {
         logkf(LOG_ERROR, "Starting CPU%{d} failed", cpu);
     }
@@ -456,15 +450,37 @@ bool sched_start_on(int cpu) {
     return poweron_ok;
 }
 
-// Start executing the scheduler on this CPU.
-void sched_exec() {
-    timestamp_us_t now = time_us();
+// Prepare a new scheduler context for this or another CPU.
+void sched_init_cpu(int cpu) {
+    sched_cpulocal_t *info = calloc(1, sizeof(sched_cpulocal_t));
 
-    // Allocate CPU-local scheduler data.
-    cpulocal_t       *cpulocal = isr_ctx_get()->cpulocal;
-    sched_cpulocal_t *info     = cpu_ctx + smp_get_cpu(cpulocal->cpuid);
-    cpulocal->sched            = info;
-    logkf(LOG_INFO, "Scheduler started on CPU%{d}", smp_cur_cpu());
+    // Prepare CPU-local data.
+    cpu_ctx[cpu]        = info;
+    info->run_lock      = SPINLOCK_T_INIT_SHARED;
+    info->incoming_lock = SPINLOCK_T_INIT_SHARED;
+
+    // Prepare idle thread.
+    void *stack = malloc(8192);
+    assert_always(stack);
+    info->idle_thread.kernel_stack_bottom  = (size_t)stack;
+    info->idle_thread.kernel_stack_top     = (size_t)stack + 8192;
+    info->idle_thread.kernel_isr_ctx.flags = ISR_CTX_FLAG_KERNEL;
+    info->idle_thread.flags                = THREAD_PRIVILEGED;
+    sched_prepare_kernel_entry(&info->idle_thread, idle_func, NULL);
+
+    // Fence memory so other CPUs see it.
+    atomic_thread_fence(memory_order_release);
+}
+
+// Start executing the scheduler on this CPU.
+NORETURN void sched_exec() {
+    timestamp_us_t now = time_us();
+    int            cpu = smp_cur_cpu();
+
+    // Get CPU-local scheduler data.
+    sched_cpulocal_t *info         = cpu_ctx[cpu];
+    isr_ctx_get()->cpulocal->sched = info;
+    logkf_from_isr(LOG_INFO, "Scheduler started on CPU%{d}", cpu);
 
     // Set next timestamp to measure load average.
     info->load_average      = 0;
@@ -472,7 +488,8 @@ void sched_exec() {
     info->load_measure_time = now + SCHED_LOAD_INTERVAL - (now % SCHED_LOAD_INTERVAL);
     atomic_store_explicit(&info->flags, 0, memory_order_release);
 
-    // Start handed over threads or idle until one is handed over to this CPU.
+    // Schedule the first thread and switch context to it, destroying the temporary context int the process.
+    // This will start handed over threads or idle until one is handed over to this CPU.
     sched_request_switch_from_isr();
     isr_context_switch();
     assert_unreachable();
@@ -480,9 +497,9 @@ void sched_exec() {
 
 // Exit the scheduler and subsequenty shut down the CPU.
 void sched_exit(int cpu) {
-    spinlock_take(&cpu_ctx[cpu].run_lock);
-    atomic_fetch_or_explicit(&cpu_ctx[cpu].flags, SCHED_EXITING, memory_order_relaxed);
-    spinlock_release(&cpu_ctx[cpu].run_lock);
+    spinlock_take(&cpu_ctx[cpu]->run_lock);
+    atomic_fetch_or_explicit(&cpu_ctx[cpu]->flags, SCHED_EXITING, memory_order_relaxed);
+    spinlock_release(&cpu_ctx[cpu]->run_lock);
 }
 
 

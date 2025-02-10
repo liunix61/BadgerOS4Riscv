@@ -28,8 +28,6 @@ extern void amd64_interrupt_handler();
 extern void amd64_syscall_wrapper();
 // Callback from ASM on non-syscall trap.
 extern void amd64_trap_handler(size_t trapno, size_t error_code);
-// Return a value from the syscall handler.
-extern void syscall_return(long long value) __attribute__((noreturn));
 
 // Explicit context switch from kernel.
 // Interrupts must be disabled on entry and will be re-enabled on exit.

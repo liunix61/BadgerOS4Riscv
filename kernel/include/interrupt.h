@@ -5,6 +5,7 @@
 
 #include "port/interrupt.h"
 
+typedef struct isr_ctx_t isr_ctx_t;
 // Interrupt service routine functions.
 typedef void (*isr_t)(int irq, void *cookie);
 // Installed ISR (opaque struct).
@@ -13,7 +14,7 @@ typedef struct isr_entry isr_entry_t;
 typedef isr_entry_t     *isr_handle_t;
 
 // Initialise interrupt drivers for this CPU.
-void irq_init();
+void irq_init(isr_ctx_t *tmp_ctx);
 
 // Enable the IRQ.
 void         irq_ch_enable(int irq);

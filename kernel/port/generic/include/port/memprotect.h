@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct mpu_ctx_t {
     // Linked list node.
     dlist_node_t node;
     // Page table root physical page number.

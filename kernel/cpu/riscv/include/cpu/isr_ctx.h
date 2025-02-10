@@ -7,13 +7,14 @@
 #include "cpu/riscv.h"
 
 #ifndef __ASSEMBLER__
-#include "cpulocal.h"
-#include "log.h"
+
 #include "memprotect.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+typedef struct cpulocal_t     cpulocal_t;
 typedef struct sched_thread_t sched_thread_t;
 typedef struct isr_ctx_t      isr_ctx_t;
 // Custom trap handler callback, returns true if the trap was suppressed.

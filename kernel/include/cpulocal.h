@@ -4,15 +4,17 @@
 #pragma once
 
 #include "cpu/arch_cpulocal.h"
-#include "scheduler/scheduler.h"
 #include "time_private.h"
 
 #include <stddef.h>
 
 
 
+// CPU-local scheduler data.
+typedef struct sched_cpulocal_t sched_cpulocal_t;
+
 // CPU-local data.
-typedef struct {
+typedef struct cpulocal_t {
     // Current CPU ID.
     size_t            cpuid;
     // Current SMP CPU inder.
@@ -31,3 +33,5 @@ typedef struct {
 
 // Per-CPU CPU-local data.
 extern cpulocal_t *cpulocal;
+
+#include "scheduler/types.h"

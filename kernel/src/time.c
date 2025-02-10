@@ -131,7 +131,8 @@ bool time_cancel_async_task(int64_t taskno) {
     for (size_t i = 0; i < tasks_len; i++) {
         if (tasks[i]->taskno == taskno) {
             found = true;
-            array_lencap_remove(&tasks, sizeof(void *), &tasks_len, &tasks_cap, NULL, i);
+            array_remove(tasks, sizeof(void *), tasks_len, NULL, i);
+            tasks_len--;
             break;
         }
     }
