@@ -36,7 +36,7 @@ static vfs_file_obj_t *create_root_fobj(badge_err_t *ec, vfs_t *vfs) {
     }
 
     // Fill out common fields.
-    mutex_init(NULL, &obj->mutex, true, false);
+    mutex_init(NULL, &obj->mutex, true);
     obj->vfs      = vfs;
     obj->refcount = 1;
 
@@ -53,8 +53,8 @@ static vfs_file_obj_t *create_root_fobj(badge_err_t *ec, vfs_t *vfs) {
 
 // Sort by VFS, then by inode.
 static int vfs_file_obj_cmp(void const *a_ptr, void const *b_ptr) {
-    vfs_file_obj_t const *a = a_ptr;
-    vfs_file_obj_t const *b = b_ptr;
+    vfs_file_obj_t const *a = *(void **)a_ptr;
+    vfs_file_obj_t const *b = *(void **)b_ptr;
 
     if ((size_t)a->vfs < (size_t)b->vfs) {
         return -1;
@@ -106,7 +106,7 @@ vfs_file_obj_t *vfs_root_open(badge_err_t *ec, vfs_t *vfs) {
 
     // Insert into file objects list.
     if (!array_lencap_sorted_insert(&objs, sizeof(void *), &objs_len, &objs_cap, &fobj, vfs_file_obj_cmp)) {
-        vfs->vtable.file_close(vfs, fobj);
+        vfs->vtable.file_close(NULL, vfs, fobj);
         free(fobj->cookie);
         free(fobj);
         fobj = NULL;
@@ -141,7 +141,8 @@ void vfs_dir_create(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size
 // If this is the last reference to an inode, the inode is deleted.
 void vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
     if (dir->is_vfs_root) {
-        dir = dir->mounted_fs;
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_DIR);
+        return;
     }
 
     // Find the dirent.
@@ -161,7 +162,8 @@ void vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t n
 // Remove a directory if it is empty.
 void vfs_rmdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
     if (dir->is_vfs_root) {
-        dir = dir->mounted_fs;
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_INUSE);
+        return;
     }
 
     // Find the dirent.
@@ -240,7 +242,7 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     if (!fobj->cookie) {
         goto err1;
     }
-    mutex_init(NULL, &fobj->mutex, true, false);
+    mutex_init(NULL, &fobj->mutex, true);
 
     // Open new file object.
     dir->vfs->vtable.file_open(ec, dir->vfs, dir, fobj, name, name_len);
@@ -272,8 +274,10 @@ vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig) {
 // Only raises an error if `file` is an invalid file descriptor.
 void vfs_file_drop_ref(badge_err_t *ec, vfs_file_obj_t *file) {
     if (atomic_fetch_sub(&file->refcount, 1) == 1) {
-        file->vfs->vtable.file_close(file->vfs, file);
+        file->vfs->vtable.file_close(ec, file->vfs, file);
         free(file->cookie);
+    } else {
+        badge_err_set_ok(ec);
     }
 }
 

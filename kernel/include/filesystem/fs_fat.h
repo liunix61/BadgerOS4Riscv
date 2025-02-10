@@ -68,7 +68,7 @@ void fs_fat_file_open(
 );
 // Close a file opened by `fs_fat_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-void fs_fat_file_close(vfs_t *vfs, vfs_file_obj_t *file);
+void fs_fat_file_close(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);
 // Read bytes from a file.
 void fs_fat_file_read(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileoff_t offset, uint8_t *readbuf, fileoff_t readlen

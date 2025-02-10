@@ -25,9 +25,10 @@ void fs_ramfs_create_file(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char
 // If the file already exists, does nothing.
 void fs_ramfs_create_dir(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Unlink a file from the given directory.
-// If `dir` is NULL, the root directory is used.
-// If this is the last reference to an inode, the inode is deleted.
-void fs_ramfs_unlink(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
+// If the file is currently open, the file object for it is provided in `file`.
+void fs_ramfs_unlink(
+    badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
+);
 // Test for the existence of a file in the given directory.
 // If `dir` is NULL, the root directory is used.
 bool fs_ramfs_exists(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
@@ -52,7 +53,7 @@ void fs_ramfs_file_open(
 );
 // Close a file opened by `fs_ramfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-void fs_ramfs_file_close(vfs_t *vfs, vfs_file_obj_t *file);
+void fs_ramfs_file_close(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);
 // Read bytes from a file.
 void fs_ramfs_file_read(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileoff_t offset, uint8_t *readbuf, fileoff_t readlen

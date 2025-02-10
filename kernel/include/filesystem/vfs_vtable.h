@@ -54,7 +54,7 @@ typedef void (*vfs_file_open_t)(
 );
 // Close a file opened by `vfs_ramfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-typedef void (*vfs_file_close_t)(vfs_t *vfs, vfs_file_obj_t *file);
+typedef void (*vfs_file_close_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file);
 // Read bytes from a file.
 typedef void (*vfs_file_read_t)(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileoff_t offset, uint8_t *readbuf, fileoff_t readlen

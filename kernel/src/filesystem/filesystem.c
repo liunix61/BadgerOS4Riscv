@@ -104,7 +104,9 @@ static walk_t walk(badge_err_t *ec, vfs_file_obj_t *dirfd, char const *path, siz
             vfs_file_drop_ref(ec, out.parent);
             if (!badge_err_is_ok(ec)) {
                 vfs_file_drop_ref(NULL, dirfd);
-                return;
+                out.parent = NULL;
+                out.file   = NULL;
+                return out;
             }
         }
         out.parent = dirfd;

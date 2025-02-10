@@ -252,11 +252,11 @@ void blkdev_erase(badge_err_t *ec, blkdev_t *dev, blksize_t block) {
         return;
     }
 
-    blkdev_flags_t *flags = dev->cache->block_flags;
-
     // Attempt to cache erase operation.
     ptrdiff_t i = blkdev_alloc_cache(dev, block);
     if (i >= 0) {
+        blkdev_flags_t *flags = dev->cache->block_flags;
+
         if (flags[i].present) {
             // Set flag in existing cache entry.
             flags[i].erase = true;

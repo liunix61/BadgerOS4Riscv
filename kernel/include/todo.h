@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "cpu/panic.h"
 #include "log.h"
+#include "panic.h"
 
 
 

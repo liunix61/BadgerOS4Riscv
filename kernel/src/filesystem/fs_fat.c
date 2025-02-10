@@ -492,7 +492,7 @@ bool fs_fat_mount(badge_err_t *ec, vfs_t *vfs) {
     // Determine filesystem type.
     if (FATFS(vfs).cluster_count < 4085) {
         FATFS(vfs).type = FAT12;
-        mutex_init(NULL, &FATFS(vfs).fat12_mutex, true, false);
+        mutex_init(NULL, &FATFS(vfs).fat12_mutex, true);
     } else if (FATFS(vfs).cluster_count < 65525) {
         FATFS(vfs).type = FAT16;
     } else {
@@ -987,8 +987,21 @@ void fs_fat_file_open(
         return;
     }
 
+    // Get on-disk position of dirent; this will serve as the inode number files and non-root dirs.
+    blkoff_t dirent_pos;
+    if (FATFS(vfs).type == FAT32) {
+        blkoff_t dirents_per_clus = FATFS(vfs).bytes_per_sector * FATFS(vfs).sectors_per_cluster / sizeof(fat_dirent_t);
+
+        dirent_pos = FATFILE(dir).clusters[FATFILE(file).dirent_no / dirents_per_clus] +
+                     FATFILE(file).dirent_no * sizeof(fat_dirent_t) +
+                     FATFS(vfs).data_sector * FATFS(vfs).bytes_per_sector;
+    } else {
+        dirent_pos = FATFS(vfs).legacy_root_sector * FATFS(vfs).bytes_per_sector +
+                     FATFILE(file).dirent_no * sizeof(fat_dirent_t);
+    }
+
     // Enter FAT infomation into file object.
-    file->inode            = ent.first_cluster_lo | (ent.first_cluster_hi << 16);
+    file->inode            = dirent_pos / sizeof(fat_dirent_t);
     file->type             = ent.attr & FAT_ATTR_DIRECTORY ? FILETYPE_DIR : FILETYPE_FILE;
     file->is_vfs_root      = false;
     file->links            = 1;
@@ -1076,16 +1089,10 @@ void fs_fat_file_read(
     }
 }
 
-// Write bytes from a file.
-void fs_fat_file_write(
+// Write without bounds check.
+static void fs_fat_file_write_unsafe(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileoff_t offset, uint8_t const *writebuf, fileoff_t writelen
 ) {
-    // Bounds check.
-    if (offset < 0 || writelen < 0 || offset + writelen > file->size) {
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
-        return;
-    }
-
     if (file->is_vfs_root && FATFS(vfs).type != FAT32) {
         // Special case: FAT12/FAT16 root directory.
         blkdev_write_bytes(
@@ -1130,6 +1137,18 @@ void fs_fat_file_write(
         writelen -= max;
         offset   += max;
     }
+}
+
+// Write bytes from a file.
+void fs_fat_file_write(
+    badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileoff_t offset, uint8_t const *writebuf, fileoff_t writelen
+) {
+    // Bounds check.
+    if (offset < 0 || writelen < 0 || offset + writelen > file->size) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
+        return;
+    }
+    fs_fat_file_write_unsafe(ec, vfs, file, offset, writebuf, writelen);
 }
 
 // Change the length of a file opened by `fs_fat_file_open`.
@@ -1199,11 +1218,12 @@ void fs_fat_file_resize(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileo
         void     *zeroes     = calloc(1, zeroes_len);
         while (pos < new_size) {
             fileoff_t max = pos + zeroes_len > new_size ? new_size - pos : zeroes_len;
-            fs_fat_file_write(ec, vfs, file, pos, zeroes, max);
+            fs_fat_file_write_unsafe(ec, vfs, file, pos, zeroes, max);
             if (!badge_err_is_ok(ec)) {
                 free(zeroes);
                 return;
             }
+            pos += max;
         }
         free(zeroes);
     }

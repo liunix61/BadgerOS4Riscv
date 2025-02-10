@@ -62,6 +62,7 @@ static ptrdiff_t find_inode(vfs_t *vfs) {
 
 // Decrease the refcount of an inode and delete it if it reaches 0.
 static void pop_inode_refcount(vfs_t *vfs, fs_ramfs_inode_t *inode) {
+    // TODO: This needs a re-work for correct `unlink` semantics.
     inode->links--;
     if (inode->links == 0) {
         // Free inode.
@@ -210,7 +211,7 @@ bool fs_ramfs_mount(badge_err_t *ec, vfs_t *vfs) {
         return false;
     }
     vfs->inode_root = VFS_RAMFS_INODE_ROOT;
-    mutex_init(ec, &RAMFS(vfs).mtx, true, false);
+    mutex_init(ec, &RAMFS(vfs).mtx, true);
     badge_err_assert_dev(ec);
 
     // Clear inode usage.
@@ -318,8 +319,10 @@ void fs_ramfs_create_dir(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char 
 }
 
 // Unlink a file from the given directory.
-// If this is the last reference to an inode, the inode is deleted.
-void fs_ramfs_unlink(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+// If the file is currently open, the file object for it is provided in `file`.
+void fs_ramfs_unlink(
+    badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
+) {
     if (name_len > VFS_RAMFS_NAME_MAX) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_TOOLONG);
     }
@@ -516,11 +519,12 @@ void fs_ramfs_file_open(
 
 // Close a file opened by `fs_ramfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
-void fs_ramfs_file_close(vfs_t *vfs, vfs_file_obj_t *file) {
+void fs_ramfs_file_close(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
     assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
     pop_inode_refcount(vfs, RAMFILE(file));
     mutex_release(NULL, &RAMFS(vfs).mtx);
     RAMFILE(file) = NULL;
+    badge_err_set_ok(ec);
 }
 
 // Read bytes from a file.
