@@ -73,7 +73,8 @@ qemu: $(BUILDDIR)/cache/OVMF.fd image
 		-device pcie-root-port,bus=pcie.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \
 		-drive if=pflash,unit=0,format=raw,file=$(BUILDDIR)/cache/OVMF.fd \
-		-device virtio-scsi-pci,id=scsi \
-		-drive id=hd0,format=raw,file=$(OUTPUT)/image.hdd \
+		-drive if=none,id=hd0,format=raw,file=$(OUTPUT)/image.hdd \
+		-device ahci,id=achi0 \
+		-device ide-hd,drive=hd0,bus=achi0.0 \
 		-serial mon:stdio -nographic \
 	| ../tools/address-filter.py -L -A $(CROSS_COMPILE)addr2line $(OUTPUT)/badger-os.elf

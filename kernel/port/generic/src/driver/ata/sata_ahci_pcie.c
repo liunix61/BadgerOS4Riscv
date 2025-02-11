@@ -6,6 +6,7 @@
 #include "interrupt.h"
 #include "log.h"
 #include "malloc.h"
+#include "page_alloc.h"
 #include "scheduler/scheduler.h"
 
 
@@ -17,6 +18,13 @@ static ata_vtable_t const sata_vtable = {};
 static void sata_ahci_isr(int irq_no, void *cookie) {
     (void)irq_no;
     sata_handle_t *handle = cookie;
+
+    uint32_t irq                               = handle->regs->generic_host_ctrl.irq_status;
+    handle->regs->generic_host_ctrl.irq_status = irq;
+    while (irq) {
+        int index  = __builtin_ctz(irq);
+        irq       ^= 1 << index;
+    }
 }
 
 // Initialize SATA AHCI driver with PCI.
@@ -76,9 +84,19 @@ static void driver_sata_ahci_pci_init(pci_addr_t addr) {
     handle->bar           = bar;
     handle->regs          = regs;
     handle->ports_enabled = 0;
+    handle->n_ports       = regs->generic_host_ctrl.cap.n_ports + 1;
 
-    int n_port = regs->generic_host_ctrl.cap.n_ports + 1;
-    for (int i = 0; i < n_port; i++) {
+    // Allocate FIS(256) and command memory(1K) for ports.
+    handle->fis_paddr = phys_page_alloc((handle->n_ports + 15) / 16, false);
+    handle->cmd_paddr = phys_page_alloc((handle->n_ports + 3) / 4, false);
+
+    for (int i = 0; i < handle->n_ports; i++) {
+        regs->ports[i].cmdlist_addr = handle->cmd_paddr + 1024 * i;
+        regs->ports[i].fis_addr     = handle->fis_paddr + 256 * i;
+    }
+
+    // Detect drives.
+    for (int i = 0; i < handle->n_ports; i++) {
         if (regs->ports[i].sstatus.detect) {
             logkf(LOG_INFO, "Found drive in slot %{d}", i);
             handle->ports_enabled |= 1ul << i;

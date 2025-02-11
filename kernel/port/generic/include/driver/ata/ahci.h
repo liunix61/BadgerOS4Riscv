@@ -4,9 +4,10 @@
 #pragma once
 
 #include "driver/ata.h"
-#include "driver/ata/ahci/ahci_port.h"
+#include "driver/ata/ahci/command.h"
 #include "driver/ata/ahci/generic_host_ctrl.h"
 #include "driver/ata/ahci/pci_cap.h"
+#include "driver/ata/ahci/port.h"
 
 // All HBA BAR registers - not meant to be constructed.
 typedef struct {
@@ -31,8 +32,14 @@ typedef struct {
     pci_addr_t       addr;
     // PCI BAR handle.
     pci_bar_handle_t bar;
-    // Enabled ports.
+    // Number of ports.
+    int              n_ports;
+    // Enabled ports (ports with drives in them).
     uint32_t         ports_enabled;
     // Pointer to HBA BAR registers.
     ahci_bar_t      *regs;
+    // Memory allocated for the command lists.
+    size_t           cmd_paddr;
+    // Memory allocated for the FIS.
+    size_t           fis_paddr;
 } sata_handle_t;
