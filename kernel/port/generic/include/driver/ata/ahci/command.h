@@ -46,4 +46,9 @@ typedef struct {
     VOLATILE uint32_t       prd_transfer_len;
     // Command table base address.
     VOLATILE uint64_t       cmdtab_paddr;
+    // Reserved.
+    uint32_t : 32;
+    uint32_t : 32;
+    uint32_t : 32;
+    uint32_t : 32;
 } ahci_cmdhdr_t;
