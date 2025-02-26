@@ -29,6 +29,8 @@ bool pcie_memprotect(pcie_controller_t *ctl) {
 // Initialise the PCIe controller.
 // Init successful or not, takes ownership of the memory in `ctl`.
 static bool pcie_controller_init() {
+    logkf(LOG_DEBUG, "PCIe config paddr: 0x%{size;x}", ctl.config_paddr);
+
     // Allocate ranges of virtual memory to map the controller into.
     size_t bus_count   = ctl.bus_end - ctl.bus_start + 1;
     size_t config_size = bus_count * PCIE_ECAM_SIZE_PER_BUS;
@@ -79,7 +81,7 @@ static void pcie_ecam_func_detect(uint8_t bus, uint8_t dev, uint8_t func) {
         hdr->classcode.subclass,
         hdr->classcode.progif
     );
-    find_pci_driver(hdr->classcode, (pci_addr_t){bus, dev, func});
+    // find_pci_driver(hdr->classcode, (pci_addr_t){bus, dev, func});
 }
 
 // Enumerate device via ECAM.
@@ -380,12 +382,34 @@ static void
         return;
     }
     ctl.type = PCIE_CTYPE_SIFIVE_FU740;
-    if (!pci_dtb_ranges(handle, node)) {
-        logk(LOG_WARN, "Malformed DTB; ignoring this PCIe controller!");
-        return;
+
+    // Read FU740 PCIe configuration space physical address.
+    ctl.config_paddr = dtb_read_cells(handle, node, "reg", 4, addr_cells);
+
+    // Read bus range.
+    dtb_prop_t *bus_range = dtb_get_prop(handle, node, "bus-range");
+    if (bus_range->content_len != 8) {
+        logk(LOG_ERROR, "Incorrect bus-range for PCI");
+        goto malformed_dtb;
     }
-    // TODO: Find FU740 PCIe configuration space.
+    ctl.bus_start = dtb_prop_read_cell(handle, bus_range, 0);
+    ctl.bus_end   = dtb_prop_read_cell(handle, bus_range, 1);
+
+    // Read PCIe interrupt mappings.
+    if (!pci_dtb_irqmap(handle, node)) {
+        goto malformed_dtb;
+    }
+
+    // Read PCIe range mappings.
+    if (!pci_dtb_ranges(handle, node)) {
+        goto malformed_dtb;
+    }
+
     pcie_controller_init();
+    return;
+
+malformed_dtb:
+    logk(LOG_WARN, "Initialization failed; ignoring this PCIe controller!");
 }
 #endif
 #endif
