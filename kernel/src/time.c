@@ -4,6 +4,7 @@
 #include "time.h"
 
 #include "arrays.h"
+#include "assertions.h"
 #include "cpulocal.h"
 #include "interrupt.h"
 #include "isr_ctx.h"
@@ -82,23 +83,20 @@ void time_set_next_task_switch(timestamp_us_t timestamp) {
 // The task with the lowest timestamp is likeliest, but not guaranteed, to run first.
 // Returns whether the task was successfully added.
 bool time_add_async_task(timertask_t *task) {
+    assert_dev_drop(task);
+
     // Interrupts must be disabled while holding spinlock.
     bool ie = irq_disable();
-
-    // Allocate a tack number.
     spinlock_take(&tasks_spinlock);
+
+    // Allocate a task number.
     task->taskno = taskno_counter++;
-    spinlock_release(&tasks_spinlock);
-
-
-    // Take spinlock while inserting into the list.
-    spinlock_take(&tasks_spinlock);
 
     // Insert into task array.
     if (tasks_len >= tasks_cap) {
         goto error;
     }
-    array_sorted_insert(&tasks, sizeof(timertask_t *), tasks_len, &task, timertask_timestamp_cmp);
+    array_sorted_insert(tasks, sizeof(timertask_t *), tasks_len, &task, timertask_timestamp_cmp);
     tasks_len++;
 
     // Release spinlock so it can be re-taken as shared in `eval_cpu_timer`.

@@ -109,10 +109,10 @@ void smp_init_dtb(dtb_handle_t *dtb) {
     sbi_supports_hsm = res.retval && !res.status;
     if (sbi_supports_hsm) {
         // SBI supports HSM; CPUs can be started and stopped.
-        logk(LOG_DEBUG, "SBI supports HSM");
+        logk(LOG_INFO, "SBI supports HSM");
     } else {
         // SBI doesn't support HSM; CPUs can be started but not stopped.
-        logk(LOG_DEBUG, "SBI doesn't support HSM");
+        logk(LOG_INFO, "SBI doesn't support HSM");
     }
 #endif
 
@@ -126,8 +126,6 @@ void smp_init_dtb(dtb_handle_t *dtb) {
     assert_always(dtb_read_uint(dtb, cpus, "#size-cells") == 0);
 #ifdef __riscv
     size_t bsp_cpuid = smp_req.response->bsp_hartid;
-#elif defined(__x86_64__)
-    size_t bsp_cpuid = smp_req.response->bsp_lapic_id;
 #endif
 
     while (cpu) {
@@ -139,7 +137,6 @@ void smp_init_dtb(dtb_handle_t *dtb) {
             cpu = cpu->next;
             continue;
         }
-#elif defined(__x86_64__)
 #else
 #error "smp_init: Unsupported architecture"
 #endif
@@ -163,7 +160,7 @@ void smp_init_dtb(dtb_handle_t *dtb) {
             detected_cpu = smp_count;
             smp_count++;
         }
-        logkf(LOG_INFO, "Detected CPU #%{d} ID %{size;d}", detected_cpu, cpuid);
+        logkf(LOG_INFO, "Detected CPU%{d} (ID %{size;d})", detected_cpu, cpuid);
 
         // Add to the maps.
         smp_map_t new_ent = {
@@ -188,8 +185,9 @@ void smp_init_dtb(dtb_handle_t *dtb) {
     // Transfer booting CPU's CPU-local data to this array.
     bool ie = irq_disable();
 
-    cpu_status[cur_cpu].cpulocal = *isr_ctx_get()->cpulocal;
-    isr_ctx_get()->cpulocal      = &cpu_status[cur_cpu].cpulocal;
+    cpu_status[cur_cpu].cpulocal   = *isr_ctx_get()->cpulocal;
+    isr_ctx_get()->cpulocal        = &cpu_status[cur_cpu].cpulocal;
+    isr_ctx_get()->cpulocal->cpuid = bsp_cpuid;
 
     irq_enable_if(ie);
 }
@@ -218,7 +216,7 @@ size_t smp_get_cpuid(int cpu) {
     smp_map_t         dummy = {.cpu = cpu};
     array_binsearch_t res   = array_binsearch(smp_unmap, sizeof(smp_map_t), smp_unmap_len, &dummy, smp_cpu_cmp);
     if (res.found) {
-        return smp_map[res.index].cpuid;
+        return smp_unmap[res.index].cpuid;
     }
     return -1;
 }
@@ -250,6 +248,7 @@ __attribute__((unused)) static void cpu1_init1_limine(struct limine_smp_info *in
     tmp_ctx.cpulocal->cpuid = info->smp_resp_procid;
     tmp_ctx.cpulocal->cpu   = cur_cpu;
     irq_init(&tmp_ctx);
+    memprotect_swap(NULL);
     cpu_status[cur_cpu].entrypoint();
     __builtin_trap();
 }
@@ -266,8 +265,9 @@ bool smp_poweron(int cpu, void *entrypoint, void *stack) {
 
     // Start the CPU up.
     if (!cpu_status[cpu].did_jump) {
+        size_t cpuid = smp_get_cpuid(cpu);
         for (uint64_t i = 0; i < smp_req.response->cpu_count; i++) {
-            if (smp_req.response->cpus[i]->smp_resp_procid == smp_map[cpu].cpuid) {
+            if (smp_req.response->cpus[i]->smp_resp_procid == cpuid) {
                 smp_req.response->cpus[i]->extra_argument = cpu;
                 atomic_store(&smp_req.response->cpus[i]->goto_address, &cpu1_init0_limine);
                 cpu_status[cpu].did_jump = true;

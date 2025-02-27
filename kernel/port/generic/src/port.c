@@ -121,7 +121,7 @@ void port_early_init() {
         [LIMINE_MEMMAP_KERNEL_AND_MODULES]     = "Kernel",
         [LIMINE_MEMMAP_FRAMEBUFFER]            = "Framebuffer",
     };
-    logkf_from_isr(LOG_DEBUG, "Memory map:");
+    // logkf_from_isr(LOG_DEBUG, "Memory map:");
     size_t kernel_len         = 0;
     size_t biggest_pool_size  = 0;
     size_t biggest_pool_index = 0;
@@ -130,13 +130,13 @@ void port_early_init() {
     size_t reclaim_len        = 0;
     for (uint64_t i = 0; i < mem->entry_count; i++) {
         struct limine_memmap_entry *entry = mem->entries[i];
-        logkf_from_isr(
-            LOG_DEBUG,
-            "%{u64;x}-%{u64;x} %{cs}",
-            entry->base,
-            entry->base + entry->length - 1,
-            types[entry->type]
-        );
+        // logkf_from_isr(
+        //     LOG_DEBUG,
+        //     "%{u64;x}-%{u64;x} %{cs}",
+        //     entry->base,
+        //     entry->base + entry->length - 1,
+        //     types[entry->type]
+        // );
         if (entry->type == LIMINE_MEMMAP_USABLE) {
             usable_len += entry->length;
         } else if (entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE ||
@@ -208,7 +208,7 @@ void port_init() {
 #ifdef PORT_ENABLE_DTB
     if (dtb_req.response) {
         // Parse and process DTB.
-        dtdump(dtb_req.response->dtb_ptr);
+        // dtdump(dtb_req.response->dtb_ptr);
         dtparse(dtb_req.response->dtb_ptr);
     } else
 #endif
@@ -225,6 +225,12 @@ void port_init() {
 #endif
     }
 
+    // Enumerate PCIe devices.
+    // pcie_ecam_detect();
+}
+
+// Reclaim bootloader memory.
+void port_reclaim_mem() {
     // Reclaim all reclaimable memory.
     size_t base = 0;
     size_t len  = 0;
@@ -237,7 +243,7 @@ void port_init() {
         }
         if (entry->base != base + len) {
             if (len > 16 * MEMMAP_PAGE_SIZE) {
-                logkf_from_isr(LOG_DEBUG, "Adding memory at 0x%{size;x}-0x%{size;x}", base, base + len - 1);
+                // logkf_from_isr(LOG_DEBUG, "Adding memory at 0x%{size;x}-0x%{size;x}", base, base + len - 1);
                 init_pool((void *)(base + mmu_hhdm_vaddr), (void *)(base + len + mmu_hhdm_vaddr), 0);
             }
             base = entry->base;
@@ -247,16 +253,19 @@ void port_init() {
         }
     }
     if (len >= 16 * MEMMAP_PAGE_SIZE) {
-        logkf_from_isr(LOG_DEBUG, "Adding memory at 0x%{size;x}-0x%{size;x}", base, base + len - 1);
+        // logkf_from_isr(LOG_DEBUG, "Adding memory at 0x%{size;x}-0x%{size;x}", base, base + len - 1);
         init_pool((void *)(base + mmu_hhdm_vaddr), (void *)(base + len + mmu_hhdm_vaddr), 0);
     }
-
-    // Enumerate PCIe devices.
-    pcie_ecam_detect();
 }
 
 // Send a single character to the log output.
 void port_putc(char msg) {
+    // Artificial delay.
+    timestamp_us_t lim = time_us();
+    if (lim) {
+        lim += 100;
+        while (time_us() < lim);
+    }
     // TODO: More proper way to do this.
 #ifdef __x86_64__
     outb(0x3f8, msg);

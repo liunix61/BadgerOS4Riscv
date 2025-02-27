@@ -98,6 +98,8 @@ void amd64_trap_handler(size_t trapno, size_t error_code) {
         return;
     }
 
+    // Unhandled trap.
+    claim_panic();
     rawprint("\033[0m");
     if (fault3) {
         rawprint("**** TRIPLE FAULT ****\n");
@@ -163,15 +165,7 @@ void amd64_trap_handler(size_t trapno, size_t error_code) {
     backtrace_from_ptr(kctx->frameptr);
 
     isr_ctx_dump(kctx);
-
-    if ((kctx->regs.cs & 3) == 0 || fault2) {
-        // When the kernel traps it's a bad time.
-        panic_poweroff();
-    } else {
-        // When the user traps just stop the process.
-        sched_raise_from_isr(kctx->thread, false, kill_proc_on_trap);
-    }
-    isr_ctx_swap(kctx);
+    panic_poweroff_unchecked();
 }
 
 // Return a value from the syscall handler.

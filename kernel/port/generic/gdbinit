@@ -11,5 +11,5 @@ end
 mon system_reset
 maintenance flush register-cache
 thb basic_runtime_init
-b panic_poweroff
+b panic_poweroff_unchecked
 c

@@ -103,6 +103,8 @@ static void kernel_lifetime_func() {
     kernel_init();
     // Start other CPUs.
     sched_start_altcpus();
+    // After secondary CPUs are started, any potential reclaiming of bootloader memory is possible.
+    port_reclaim_mem();
     // Start userland.
     userland_init();
 

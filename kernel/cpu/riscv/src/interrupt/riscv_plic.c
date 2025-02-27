@@ -135,7 +135,7 @@ static void plic_dtb_init(dtb_handle_t *dtb, dtb_node_t *node, uint32_t addr_cel
     for (uint16_t i = 0; i < plic_ctx_count; i++) {
         if (plic_ctx[i].irq == RISCV_INT_SUPERVISOR_EXT) {
             plic_smp_ctx[smp_get_cpu(plic_ctx[i].hartid)] = i;
-            logkf(LOG_DEBUG, "CPU%{d} PLIC ctx is %{d}", smp_get_cpu(plic_ctx[i].hartid), i);
+            // logkf(LOG_DEBUG, "CPU%{d} PLIC ctx is %{d}", smp_get_cpu(plic_ctx[i].hartid), i);
         }
     }
 

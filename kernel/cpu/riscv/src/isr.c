@@ -132,6 +132,7 @@ void riscv_trap_handler() {
     }
 
     // Unhandled trap.
+    claim_panic();
     rawprint("\033[0m");
     if (fault3) {
         rawprint("**** TRIPLE FAULT ****\n");
@@ -208,15 +209,7 @@ void riscv_trap_handler() {
     backtrace_from_ptr(kctx->frameptr);
 
     isr_ctx_dump(kctx);
-
-    if ((status & (CSR_STATUS_PP_MASK << CSR_STATUS_PP_BASE_BIT)) || fault2) {
-        // When the kernel traps it's a bad time.
-        panic_poweroff();
-    } else {
-        // When the user traps just stop the process.
-        sched_raise_from_isr(kctx->thread, false, kill_proc_on_trap);
-    }
-    isr_ctx_swap(kctx);
+    panic_poweroff_unchecked();
 }
 
 // Return a value from the syscall handler.

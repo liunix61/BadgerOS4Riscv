@@ -74,10 +74,10 @@ static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
     // Set preemption timer.
     timestamp_us_t now     = time_us();
     timestamp_us_t timeout = now + SCHED_MIN_US + SCHED_INC_US * thread->priority;
-    if (timeout > info->load_measure_time) {
-        timeout = info->load_measure_time;
-    }
-    info->last_preempt = now;
+    // if (timeout > info->load_measure_time) {
+    //     timeout = info->load_measure_time;
+    // }
+    info->last_preempt     = now;
     time_set_next_task_switch(timeout);
 
     // Run arch-specific pre-task-switch code.
@@ -247,6 +247,7 @@ static void sw_handle_loadbalance(timestamp_us_t now, int cur_cpu, sched_cpuloca
 
 // Requests the scheduler to prepare a switch from inside an interrupt routine.
 void sched_request_switch_from_isr() {
+    check_for_panic();
     timestamp_us_t    now     = time_us();
     int               cur_cpu = smp_cur_cpu();
     sched_cpulocal_t *info    = cpu_ctx[cur_cpu];
@@ -271,15 +272,15 @@ void sched_request_switch_from_isr() {
 
     // Check for load measurement timer.
     // Ignored when timestamp is 0 in case timers aren't active yet.
-    if (now && now >= info->load_measure_time && (sched_fl & SCHED_RUNNING)) {
-        // Measure load on this CPU.
-        sw_measure_load(now, cur_cpu, info);
-        // Balance load with other running CPUs.
-        sw_handle_loadbalance(now, cur_cpu, info);
+    // if (now && now >= info->load_measure_time && (sched_fl & SCHED_RUNNING)) {
+    //     // Measure load on this CPU.
+    //     sw_measure_load(now, cur_cpu, info);
+    //     // Balance load with other running CPUs.
+    //     sw_handle_loadbalance(now, cur_cpu, info);
 
-        // Set next timestamp to measure load average.
-        info->load_measure_time = now + SCHED_LOAD_INTERVAL - (now % SCHED_LOAD_INTERVAL);
-    }
+    //     // Set next timestamp to measure load average.
+    //     info->load_measure_time = now + SCHED_LOAD_INTERVAL - (now % SCHED_LOAD_INTERVAL);
+    // }
 
     // Check for incoming threads.
     spinlock_take(&info->incoming_lock);
@@ -472,6 +473,12 @@ void sched_init_cpu(int cpu) {
     atomic_thread_fence(memory_order_release);
 }
 
+// Thread function that reports the scheduler to be up and exits.
+static int sched_up_reporter(void *ctx) {
+    logkf_from_isr(LOG_INFO, "Scheduler started on CPU%{d}", (int)(size_t)ctx);
+    return 0;
+}
+
 // Start executing the scheduler on this CPU.
 NORETURN void sched_exec() {
     timestamp_us_t now = time_us();
@@ -480,7 +487,8 @@ NORETURN void sched_exec() {
     // Get CPU-local scheduler data.
     sched_cpulocal_t *info         = cpu_ctx[cpu];
     isr_ctx_get()->cpulocal->sched = info;
-    logkf_from_isr(LOG_INFO, "Scheduler started on CPU%{d}", cpu);
+    tid_t tid = thread_new_kernel(NULL, NULL, sched_up_reporter, (void *)(size_t)cpu, SCHED_PRIO_NORMAL);
+    thread_resume_now(NULL, tid);
 
     // Set next timestamp to measure load average.
     info->load_average      = 0;

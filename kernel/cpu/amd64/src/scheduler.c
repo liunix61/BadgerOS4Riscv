@@ -155,10 +155,6 @@ bool sched_signal_exit() {
 
 // Return to exit the thread.
 static void sched_exit_self(int code) {
-#ifndef NDEBUG
-    sched_thread_t *const thread = sched_current_thread();
-    logkf(LOG_DEBUG, "Kernel thread '%{cs}' returned %{d}", thread->name, code);
-#endif
     thread_exit(code);
 }
 

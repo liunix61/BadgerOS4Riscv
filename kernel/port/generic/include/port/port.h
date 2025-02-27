@@ -11,6 +11,8 @@
 void port_early_init();
 // Post-heap hardware initialization.
 void port_postheap_init();
+// Reclaim bootloader memory.
+void port_reclaim_mem();
 // Full hardware initialization.
 void port_init();
 // Power off.

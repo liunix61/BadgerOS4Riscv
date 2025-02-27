@@ -69,6 +69,7 @@ add_executable(${target}
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/log.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/mutex.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/num_to_str.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/panic.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/rawprint.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/semaphore.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/spinlock.c

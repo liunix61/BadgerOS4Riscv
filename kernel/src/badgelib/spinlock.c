@@ -45,6 +45,6 @@ void spinlock_take_shared(spinlock_t *lock) {
 // Release the spinlock shared.
 void spinlock_release_shared(spinlock_t *lock) {
     assert_dev_drop(!irq_is_enabled());
-    int res = atomic_fetch_sub(lock, 2);
+    int res = atomic_fetch_sub_explicit(lock, 2, memory_order_release);
     assert_dev_drop(res >= 2);
 }
