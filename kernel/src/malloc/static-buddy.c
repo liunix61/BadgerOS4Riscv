@@ -525,6 +525,23 @@ void buddy_deallocate(void *ptr) {
     free_block(pool, block);
 }
 
+void buddy_split_allocated(void *ptr) {
+    memory_pool_t *pool  = NULL;
+    buddy_block_t *block = buddy_get_block(ptr, &pool);
+
+    if (!block) {
+        return;
+    }
+
+    --block->order;
+    size_t index       = block_to_index(pool, block);
+    size_t buddy_index = index ^ (1 << block->order); // Get buddy of our new lower order
+
+    buddy_block_t *new_block = index_to_block(pool, buddy_index);
+    new_block->order         = block->order;
+    new_block->type          = block->type;
+}
+
 void *buddy_reallocate(void *ptr, size_t size) {
     BADGEROS_MALLOC_MSG_DEBUG("buddy_reallocate(" FMT_P ", " FMT_ZI ")", ptr, size);
 

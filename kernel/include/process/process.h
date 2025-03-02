@@ -49,7 +49,8 @@ void     proc_start(badge_err_t *ec, pid_t pid);
 // Returns actual virtual address on success, 0 on failure.
 size_t proc_map(badge_err_t *ec, pid_t pid, size_t vaddr_req, size_t min_size, size_t min_align, int flags);
 // Release memory allocated to a process.
-void   proc_unmap(badge_err_t *ec, pid_t pid, size_t base);
+// The given span should not fall outside an area mapped with `proc_map_raw`.
+void   proc_unmap(badge_err_t *ec, pid_t pid, size_t vaddr, size_t len);
 // Whether the process owns this range of memory.
 // Returns the lowest common denominator of the access bits bitwise or 8.
 int    proc_map_contains(badge_err_t *ec, pid_t pid, size_t base, size_t size);

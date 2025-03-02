@@ -26,38 +26,15 @@
 // Map a new range of memory at an arbitrary virtual address.
 // This may round up to a multiple of the page size.
 // Alignment may be less than `align` if the kernel doesn't support it.
-void *syscall_mem_alloc(size_t vaddr_req, size_t min_size, size_t min_align, int flags) {
-    return (void *)proc_map_raw(NULL, proc_current(), vaddr_req, min_size, min_align, flags);
-}
-
-// Get the size of a range of memory previously allocated with `SYSCALL_MEM_ALLOC`.
-// Returns 0 if there is no range starting at the given address.
-size_t syscall_mem_size(void *address) {
-    process_t *const proc = proc_current();
-    mutex_acquire_shared(NULL, &proc->mtx, TIMESTAMP_US_MAX);
-    size_t res = 0;
-    for (size_t i = 0; i < proc->memmap.regions_len; i++) {
-#if MEMMAP_VMEM
-        if (proc->memmap.regions[i].vaddr == (size_t)address) {
-            res = proc->memmap.regions[i].size;
-            break;
-        }
-#else
-        if (proc->memmap.regions[i].paddr == (size_t)address) {
-            res = proc->memmap.regions[i].size;
-            break;
-        }
-#endif
-    }
-    mutex_release_shared(NULL, &proc->mtx);
-    return res;
+void *syscall_mem_map(void *vaddr_req, size_t min_size, size_t min_align, int flags) {
+    return (void *)proc_map_raw(NULL, proc_current(), (size_t)vaddr_req, min_size, min_align, flags);
 }
 
 // Unmap a range of memory previously allocated with `SYSCALL_MEM_ALLOC`.
 // Returns whether a range of memory was unmapped.
-bool syscall_mem_dealloc(void *address) {
+bool syscall_mem_unmap(void *address, size_t len) {
     badge_err_t *ec = {0};
-    proc_unmap_raw(ec, proc_current(), (size_t)address);
+    proc_unmap_raw(ec, proc_current(), (size_t)address, len);
     return badge_err_is_ok(ec);
 }
 

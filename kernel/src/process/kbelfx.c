@@ -104,7 +104,7 @@ bool kbelfx_seg_alloc(kbelf_inst inst, size_t segs_len, kbelf_segment *segs) {
 
     if (!kbelf_inst_is_pie(inst) && vaddr_real != min_addr) {
         logkf(LOG_ERROR, "Unable to satify virtual address request for non-PIE executable");
-        proc_unmap_raw(NULL, proc, vaddr_real);
+        proc_unmap_raw(NULL, proc, vaddr_real, max_addr - min_addr);
         return false;
     }
 
@@ -128,7 +128,7 @@ void kbelfx_seg_free(kbelf_inst inst, size_t segs_len, kbelf_segment *segs) {
     (void)segs;
     process_t *proc = proc_get(kbelf_inst_getpid(inst));
     assert_dev_keep(proc != NULL);
-    proc_unmap_raw(NULL, proc, (size_t)segs[0].alloc_cookie);
+    proc_unmap_raw(NULL, proc, segs[0].vaddr_real, (size_t)segs[0].alloc_cookie);
 }
 
 

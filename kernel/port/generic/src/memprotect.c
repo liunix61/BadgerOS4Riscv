@@ -244,7 +244,7 @@ static bool pt_unmap_1(size_t pt_ppn, int pt_level, size_t vpn, int pte_level) {
 
     // Walk the page table, adding new tables as needed.
     for (; pte_level < pt_level; pt_level--) {
-        size_t    pte_paddr = pt_ppn * MMU_PAGE_SIZE + mmu_vpn_part(vpn, pte_level) * sizeof(mmu_pte_t);
+        size_t    pte_paddr = pt_ppn * MMU_PAGE_SIZE + mmu_vpn_part(vpn, pt_level) * sizeof(mmu_pte_t);
         // Too high; read PTE to go to next table.
         mmu_pte_t pte       = mmu_read_pte(pte_paddr);
         if (!mmu_pte_is_valid(pte, pt_level)) {

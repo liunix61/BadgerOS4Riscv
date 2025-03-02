@@ -46,3 +46,13 @@ void phys_page_free(size_t ppn) {
     buddy_deallocate((void *)(ppn * MEMMAP_PAGE_SIZE));
 #endif
 }
+
+// Split a physical page allocation into two in the allocator.
+// Uses physical page numbers (paddr / MEMMAP_PAGE_SIZE).
+void phys_page_split(size_t ppn) {
+#if MEMMAP_VMEM
+    buddy_split_allocated((void *)(ppn * MEMMAP_PAGE_SIZE + mmu_hhdm_vaddr));
+#else
+    buddy_split_allocated((void *)(ppn * MEMMAP_PAGE_SIZE));
+#endif
+}

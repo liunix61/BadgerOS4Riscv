@@ -535,9 +535,9 @@ void proc_delete_runtime_raw(process_t *process) {
     // Unmap all memory regions.
     while (process->memmap.regions_len) {
 #if MEMMAP_VMEM
-        proc_unmap_raw(NULL, process, process->memmap.regions[0].vaddr);
+        proc_unmap_raw(NULL, process, process->memmap.regions[0].vaddr, process->memmap.regions[0].size);
 #else
-        proc_unmap_raw(NULL, process, process->memmap.regions[0].paddr);
+        proc_unmap_raw(NULL, process, process->memmap.regions[0].paddr, process->memmap.regions[0].size);
 #endif
     }
 

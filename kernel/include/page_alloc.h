@@ -18,3 +18,6 @@ size_t phys_page_size(size_t ppn);
 // Free pages of physical memory.
 // Uses physical page numbers (paddr / MEMMAP_PAGE_SIZE).
 void   phys_page_free(size_t ppn);
+// Split a physical page allocation into two in the allocator.
+// Uses physical page numbers (paddr / MEMMAP_PAGE_SIZE).
+void   phys_page_split(size_t ppn);

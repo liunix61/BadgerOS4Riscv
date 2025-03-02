@@ -26,15 +26,33 @@
 static int proc_memmap_cmp(void const *a, void const *b) {
     proc_memmap_ent_t const *a_ptr = a;
     proc_memmap_ent_t const *b_ptr = b;
-#if MEMAP_VMEM
+#if MEMMAP_VMEM
     if (a_ptr->vaddr < b_ptr->vaddr)
         return -1;
-    if (a_ptr->vaddr < b_ptr->vaddr)
+    if (a_ptr->vaddr > b_ptr->vaddr)
         return 1;
 #else
     if (a_ptr->paddr < b_ptr->paddr)
         return -1;
-    if (a_ptr->paddr < b_ptr->paddr)
+    if (a_ptr->paddr > b_ptr->paddr)
+        return 1;
+#endif
+    return 0;
+}
+
+// Memory map address search function.
+static int proc_memmap_search(void const *a, void const *_b) {
+    proc_memmap_ent_t const *a_ptr = a;
+    size_t                   b     = (size_t)_b;
+#if MEMMAP_VMEM
+    if (a_ptr->vaddr < b)
+        return -1;
+    if (a_ptr->vaddr > b)
+        return 1;
+#else
+    if (a_ptr->paddr < b)
+        return -1;
+    if (a_ptr->paddr > b)
         return 1;
 #endif
     return 0;
@@ -42,6 +60,7 @@ static int proc_memmap_cmp(void const *a, void const *b) {
 
 #if MEMMAP_VMEM
 // Allocate more memory to a process.
+// Returns actual virtual address on success, 0 on failure.
 size_t proc_map_raw(
     badge_err_t *ec, process_t *proc, size_t vaddr_req, size_t min_size, size_t min_align, uint32_t flags
 ) {
@@ -50,18 +69,18 @@ size_t proc_map_raw(
     // Correct virtual address.
     if (min_align & (min_align - 1)) {
         logkf(LOG_WARN, "min_align=%{size;d} ignored because it is not a power of 2", min_align);
-        min_align = 1;
+        min_align = MEMMAP_PAGE_SIZE;
+    } else if (min_align < MEMMAP_PAGE_SIZE) {
+        min_align = MEMMAP_PAGE_SIZE;
     }
     if (vaddr_req < 65536 || vaddr_req < MEMMAP_PAGE_SIZE) {
         vaddr_req = 65536 > MEMMAP_PAGE_SIZE ? 65536 : MEMMAP_PAGE_SIZE;
-    } else if (vaddr_req % MEMMAP_PAGE_SIZE) {
-        vaddr_req += MEMMAP_PAGE_SIZE - vaddr_req % MEMMAP_PAGE_SIZE;
     }
     if (vaddr_req & (min_align - 1)) {
         vaddr_req += min_align - (vaddr_req & (min_align - 1));
     }
-    if (min_size % MEMMAP_PAGE_SIZE) {
-        min_size += MEMMAP_PAGE_SIZE - min_size % MEMMAP_PAGE_SIZE;
+    if (min_size & (min_align - 1)) {
+        min_size += min_align - (min_size & (min_align - 1));
     }
     if (vaddr_req + min_size > mmu_half_size) {
         vaddr_req = mmu_half_size - min_size;
@@ -89,7 +108,7 @@ size_t proc_map_raw(
     size_t i     = 0;
     while (i < pages) {
         size_t alloc, ppn;
-        for (alloc = __builtin_clzll(pages - i); alloc; alloc >>= 1) {
+        for (alloc = (size_t)1 << __builtin_ctzll(((pages - i) | (vpn + i)) / MEMMAP_PAGE_SIZE); alloc; alloc >>= 1) {
             ppn = phys_page_alloc(alloc, true);
             if (ppn) {
                 break;
@@ -101,7 +120,7 @@ size_t proc_map_raw(
         }
         proc_memmap_ent_t new_ent = {
             .paddr = ppn * MEMMAP_PAGE_SIZE,
-            .vaddr = vpn * MEMMAP_PAGE_SIZE,
+            .vaddr = (vpn + i) * MEMMAP_PAGE_SIZE,
             .size  = alloc * MEMMAP_PAGE_SIZE,
             .write = true,
             .exec  = true,
@@ -141,36 +160,116 @@ error:
     return 0;
 }
 
-// Release memory allocated to a process.
-void proc_unmap_raw(badge_err_t *ec, process_t *proc, size_t base) {
-    proc_memmap_t *map = &proc->memmap;
-    for (size_t i = 0; i < map->regions_len; i++) {
-        if (map->regions[i].vaddr == base) {
-            // Remove region entry.
-            proc_memmap_ent_t region = map->regions[i];
-            array_remove(map->regions, sizeof(proc_memmap_ent_t), map->regions_len, NULL, i);
-            map->regions_len--;
+// Split the memory map until `vaddr` to `vaddr+len` is an unique range.
+static inline size_t split_regions(proc_memmap_t *map, size_t index, size_t vaddr, size_t len) {
+    while (1) {
+        proc_memmap_ent_t *ent = map->regions + index;
+        if (ent->vaddr == vaddr && ent->size == len) {
+            // Range matches memmap entry; we're done here.
+            return index;
+        }
 
-            // Revoke user access to the memory.
-            assert_dev_keep(memprotect_u(map, &map->mpu_ctx, base, 0, region.size, 0));
-            memprotect_commit(&map->mpu_ctx);
+        // Split entry.
+        phys_page_split(ent->paddr / MEMMAP_PAGE_SIZE);
+        ent->size                 /= 2;
+        proc_memmap_ent_t new_ent  = *ent;
+        new_ent.paddr             += new_ent.size;
+        new_ent.vaddr             += new_ent.size;
 
-            // Release physical memory.
-            size_t vaddr = base;
-            while (vaddr < base + region.size) {
-                virt2phys_t v2p = memprotect_virt2phys(&map->mpu_ctx, vaddr);
-                assert_dev_drop(v2p.flags & MEMPROTECT_FLAG_RWX);
-                assert_dev_drop(!(v2p.flags & MEMPROTECT_FLAG_KERNEL));
-                vaddr += phys_page_size(v2p.paddr / MEMMAP_PAGE_SIZE) * MEMMAP_PAGE_SIZE;
-                phys_page_free(v2p.paddr / MEMMAP_PAGE_SIZE);
-            }
+        // Insert new entry in memory map.
+        if (!array_lencap_insert(
+                &map->regions,
+                sizeof(proc_memmap_ent_t),
+                &map->regions_len,
+                &map->regions_cap,
+                &new_ent,
+                index + 1
+            )) {
+            logk(LOG_FATAL, "Out of memory");
+            panic_abort();
+        }
 
-            badge_err_set_ok(ec);
-            logkf(LOG_INFO, "Unmapped %{size;d} bytes at %{size;x} from process %{d}", region.size, base, proc->pid);
-            return;
+        if (new_ent.vaddr <= vaddr) {
+            // Continue with second half instead of first half.
+            index++;
         }
     }
-    badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
+}
+
+// Release memory allocated to a process from `vaddr` to `vaddr+len`.
+// The given span should not fall outside an area mapped with `proc_map_raw`.
+void proc_unmap_raw(badge_err_t *ec, process_t *proc, size_t vaddr, size_t len) {
+    proc_memmap_t *map = &proc->memmap;
+    assert_dev_drop(proc_map_contains_raw(proc, vaddr, len));
+
+    // Align `vaddr` and `len` to page sizes.
+    if (vaddr % MEMMAP_PAGE_SIZE) {
+        len   += vaddr % MEMMAP_PAGE_SIZE;
+        vaddr -= vaddr % MEMMAP_PAGE_SIZE;
+    }
+    if (len % MEMMAP_PAGE_SIZE) {
+        len += MEMMAP_PAGE_SIZE - len % MEMMAP_PAGE_SIZE;
+    }
+
+    // Array of pages to free.
+    size_t *to_free     = NULL;
+    size_t  to_free_len = 0, to_free_cap = 0;
+
+    // Find start of mapped region.
+    array_binsearch_t search =
+        array_binsearch(map->regions, sizeof(proc_memmap_ent_t), map->regions_len, (void *)vaddr, proc_memmap_search);
+    assert_dev_drop(search.found);
+    size_t index = search.index;
+    assert_dev_drop(map->regions[index].vaddr <= vaddr);
+    assert_dev_drop(vaddr < map->regions[index].vaddr + map->regions[index].size);
+
+    // Split mapped regions and unmap them from the process.
+    while (len) {
+        // Get sub-block offset; it dictates how to split and release memory.
+        size_t page_off = vaddr - map->regions[index].vaddr;
+        size_t order    = __builtin_ctzll((page_off | map->regions[index].size) / MEMMAP_PAGE_SIZE);
+
+        // Split the memory and remove the region in question.
+        size_t            split_index = split_regions(map, index, vaddr, MEMMAP_PAGE_SIZE << order);
+        proc_memmap_ent_t removed;
+        array_lencap_remove(
+            &map->regions,
+            sizeof(proc_memmap_ent_t),
+            &map->regions_len,
+            &map->regions_cap,
+            &removed,
+            split_index
+        );
+
+        // Add it to the list of blocks to free and remove it from the page table.
+        size_t split_ppn = removed.paddr / MEMMAP_PAGE_SIZE;
+        if (!array_lencap_insert(&to_free, sizeof(size_t), &to_free_len, &to_free_cap, &split_ppn, to_free_len)) {
+            logk(LOG_FATAL, "Out of memory");
+            panic_abort();
+        }
+        memprotect_u(map, &map->mpu_ctx, vaddr, 0, (size_t)MEMMAP_PAGE_SIZE << order, 0);
+        logkf(
+            LOG_INFO,
+            "Unmapped %{size;d} bytes at %{size;x} from process %{d}",
+            (size_t)MEMMAP_PAGE_SIZE << order,
+            vaddr,
+            proc->pid
+        );
+
+        // Remove it from the space to unmap.
+        vaddr += (size_t)MEMMAP_PAGE_SIZE << order;
+        len   -= (size_t)MEMMAP_PAGE_SIZE << order;
+        index  = split_index;
+    }
+
+    // Commit the new page tables.
+    memprotect_commit(&map->mpu_ctx);
+
+    // Release those same pages.
+    for (size_t i = 0; i < to_free_len; i++) {
+        phys_page_free(to_free[i]);
+    }
+    free(to_free);
 }
 
 // Whether the process owns this range of virtual memory.
@@ -350,11 +449,12 @@ size_t proc_map(badge_err_t *ec, pid_t pid, size_t vaddr_req, size_t min_size, s
 }
 
 // Release memory allocated to a process.
-void proc_unmap(badge_err_t *ec, pid_t pid, size_t base) {
+// The given span should not fall outside an area mapped with `proc_map_raw`.
+void proc_unmap(badge_err_t *ec, pid_t pid, size_t vaddr, size_t len) {
     mutex_acquire(NULL, &proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get(pid);
     if (proc) {
-        proc_unmap_raw(ec, proc, base);
+        proc_unmap_raw(ec, proc, vaddr, len);
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }

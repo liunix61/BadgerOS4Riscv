@@ -125,15 +125,11 @@ SYSCALL_DEF(20, SYSCALL_FS_GETDENTS, syscall_fs_getdents, long, file_t fd, void 
 // Map a new range of memory at an arbitrary virtual address.
 // This may round up to a multiple of the page size.
 // Alignment may be less than `align` if the kernel doesn't support it.
-SYSCALL_DEF(23, SYSCALL_MEM_ALLOC, syscall_mem_alloc, void *, size_t vaddr, size_t size, size_t align, int flags)
+SYSCALL_DEF(23, SYSCALL_MEM_MAP, syscall_mem_map, void *, void *address, size_t size, size_t align, int flags)
 
-// Get the size of a range of memory previously allocated with `SYSCALL_MEM_ALLOC`.
-// Returns 0 if there is no range starting at the given address.
-SYSCALL_DEF(24, SYSCALL_MEM_SIZE, syscall_mem_size, size_t, void *address)
-
-// Unmap a range of memory previously allocated with `SYSCALL_MEM_ALLOC`.
+// Unmap a range of memory previously allocated with `SYSCALL_MEM_MAP`.
 // Returns whether a range of memory was unmapped.
-SYSCALL_DEF(25, SYSCALL_MEM_DEALLOC, syscall_mem_dealloc, bool, void *address)
+SYSCALL_DEF(25, SYSCALL_MEM_UNMAP, syscall_mem_unmap, bool, void *address, size_t size)
 
 
 

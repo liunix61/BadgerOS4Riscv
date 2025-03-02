@@ -39,6 +39,7 @@ size_t slab_get_size(void *ptr);
 void           *buddy_allocate(size_t size, enum block_type type, uint32_t flags);
 void           *buddy_reallocate(void *ptr, size_t size);
 void            buddy_deallocate(void *ptr);
+void            buddy_split_allocated(void *ptr);
 enum block_type buddy_get_type(void *ptr);
 size_t          buddy_get_size(void *ptr);
 
