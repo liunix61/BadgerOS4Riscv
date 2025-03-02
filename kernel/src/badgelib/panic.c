@@ -58,6 +58,7 @@ static atomic_int panic_flag;
 // Try to atomically claim the panic flag.
 // Only ever call this if a subsequent call to `panic_abort_unchecked` or `panic_poweroff_unchecked` is imminent.
 void claim_panic() {
+    irq_disable();
     if (atomic_fetch_add_explicit(&panic_flag, 1, memory_order_release)) {
         // Didn't win the flag.
         cpu_panic_poweroff();
