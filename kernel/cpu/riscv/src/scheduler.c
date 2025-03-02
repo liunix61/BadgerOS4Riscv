@@ -24,8 +24,9 @@
 // If `syscall` is true, copies registers `a0` through `a7` to the kernel thread.
 // Sets the program counter for the thread to `pc`.
 void sched_raise_from_isr(sched_thread_t *thread, bool syscall, void *entry_point) {
+    assert_dev_drop(thread);
     assert_dev_drop(!(thread->flags & THREAD_KERNEL) && !(thread->flags & THREAD_PRIVILEGED));
-    thread->flags |= THREAD_PRIVILEGED;
+    atomic_fetch_or(&thread->flags, THREAD_PRIVILEGED);
 
     // Set kernel thread entrypoint.
     thread->kernel_isr_ctx.regs.pc = (size_t)entry_point;

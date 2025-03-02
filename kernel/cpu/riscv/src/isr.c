@@ -102,15 +102,17 @@ void riscv_trap_handler() {
                 isr_ctx_swap(kctx);
                 return;
 
-#ifndef MEMMAP_VMEM
-                // Access faults should never happen with VMEM enabled; this is the kernel's failing.
+#if MEMMAP_VMEM
+                // With VMEM enabled, only page faults are expected.
+            case RISCV_TRAP_IPAGE:
+            case RISCV_TRAP_LPAGE:
+            case RISCV_TRAP_SPAGE:
+#else
+                // Without VMEM enabled, only access faults are expected.
             case RISCV_TRAP_IACCESS:
             case RISCV_TRAP_LACCESS:
             case RISCV_TRAP_SACCESS:
 #endif
-            case RISCV_TRAP_IPAGE:
-            case RISCV_TRAP_LPAGE:
-            case RISCV_TRAP_SPAGE:
                 // Memory access faults go to the SIGSEGV handler.
                 sched_raise_from_isr(kctx->thread, true, proc_sigsegv_handler);
                 kctx->thread->kernel_isr_ctx.regs.a0 = tval;
@@ -136,7 +138,7 @@ void riscv_trap_handler() {
     rawprint("\033[0m");
     if (fault3) {
         rawprint("**** TRIPLE FAULT ****\n");
-        panic_poweroff();
+        panic_poweroff_unchecked();
     } else if (fault2) {
         rawprint("**** DOUBLE FAULT ****\n");
     }

@@ -24,8 +24,6 @@
 
 // Number of CPUs with running schedulers.
 static atomic_int        running_sched_count;
-// Number of CPUs ready to perform a load balance.
-static atomic_int        loadbalance_ready_count;
 // CPU-local scheduler structs.
 static sched_cpulocal_t *cpu_ctx[64];
 // Threads list mutex.
@@ -55,6 +53,14 @@ sched_thread_t *thread_dequeue_self() {
     return self;
 }
 
+// Hand a thread off to another CPU.
+// The thread must not yet be in any runqueue and interrupts must be disabled.
+static void thread_handoff(sched_thread_t *thread, int cpu) {
+    spinlock_take(&cpu_ctx[cpu]->queue_lock);
+    dlist_prepend(&cpu_ctx[cpu]->queue, &thread->node);
+    spinlock_release(&cpu_ctx[cpu]->queue_lock);
+}
+
 // Set the context switch to a certain thread.
 static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
     int pflags = thread->process ? atomic_load(&thread->process->flags) : 0;
@@ -74,61 +80,16 @@ static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
     // Set preemption timer.
     timestamp_us_t now     = time_us();
     timestamp_us_t timeout = now + SCHED_MIN_US + SCHED_INC_US * thread->priority;
-    // if (timeout > info->load_measure_time) {
-    //     timeout = info->load_measure_time;
-    // }
-    info->last_preempt     = now;
+    if (timeout > info->load_measure_time) {
+        timeout = info->load_measure_time;
+    }
+    info->last_preempt = now;
     time_set_next_task_switch(timeout);
+
+    assert_dev_drop(!!(tflags & THREAD_PRIVILEGED) == !!(next->flags & ISR_CTX_FLAG_KERNEL));
 
     // Run arch-specific pre-task-switch code.
     sched_arch_task_switch(thread);
-}
-
-// Try to hand a thread off to another CPU.
-// The thread must not yet be in any runqueue.
-bool thread_handoff(sched_thread_t *thread, int cpu, bool force, int max_load) {
-    sched_cpulocal_t *info = cpu_ctx[cpu];
-    spinlock_take_shared(&info->run_lock);
-
-    int  flags      = atomic_load(&info->flags);
-    bool is_running = (flags & SCHED_RUNNING) && !(flags & SCHED_EXITING);
-    if (!force && !is_running) {
-        return false;
-    }
-    int  usage     = atomic_load(&thread->timeusage.cpu_usage);
-    bool has_space = true;
-
-    if (force) {
-        // Force handoff; always add to load estimate.
-        atomic_fetch_add_explicit(&info->load_estimate, usage, memory_order_relaxed);
-    } else {
-        // Normal handoff; try to claim space on this CPU for this thread.
-        int cur = atomic_load_explicit(&info->load_estimate, memory_order_relaxed);
-        int next;
-        do {
-            next = cur + usage;
-            if (next > max_load) {
-                has_space = false;
-                break;
-            }
-        } while (!atomic_compare_exchange_strong_explicit(
-            &info->load_estimate,
-            &cur,
-            next,
-            memory_order_relaxed,
-            memory_order_relaxed
-        ));
-    }
-
-    if (force || has_space) {
-        // Scheduler is running and has capacity for this thread.
-        spinlock_take(&info->incoming_lock);
-        dlist_append(&info->incoming, &thread->node);
-        spinlock_release(&info->incoming_lock);
-    }
-
-    spinlock_release_shared(&info->run_lock);
-    return (flags & SCHED_RUNNING) && !(flags & SCHED_EXITING);
 }
 
 // Handle non-normal scheduler flags.
@@ -150,17 +111,23 @@ static void sw_handle_sched_flags(timestamp_us_t now, int cur_cpu, sched_cpuloca
         atomic_store_explicit(&info->load_average, 0, memory_order_relaxed);
         atomic_store_explicit(&info->load_estimate, 0, memory_order_relaxed);
         atomic_fetch_sub_explicit(&running_sched_count, 1, memory_order_relaxed);
-        atomic_fetch_and(&info->flags, ~(SCHED_RUNNING | SCHED_EXITING));
+        atomic_fetch_and_explicit(&info->flags, ~(SCHED_RUNNING | SCHED_EXITING), memory_order_relaxed);
 
         // Hand all threads over to other CPUs.
-        int cpu = 0;
-        dlist_concat(&info->queue, &info->incoming);
-        while (info->queue.len) {
-            sched_thread_t *thread = (void *)dlist_pop_front(&info->queue);
-            do {
-                cpu = (cpu + 1) % smp_count;
-            } while (cpu == cur_cpu || !thread_handoff(thread, cpu, false, __INT_MAX__));
+        spinlock_take(&info->queue_lock);
+        for (int cpu = 0; info->queue.len && cpu < smp_count; cpu++) {
+            spinlock_take(&cpu_ctx[cpu]->queue_lock);
+            if (atomic_load_explicit(&cpu_ctx[cpu]->flags, memory_order_relaxed) & SCHED_RUNNING) {
+                // This CPU has a running scheduler and we can simply dump all threads there.
+                dlist_concat(&cpu_ctx[cpu]->queue, &info->queue);
+            }
+            spinlock_release(&cpu_ctx[cpu]->queue_lock);
         }
+        if (info->queue.len) {
+            logkf_from_isr(LOG_FATAL, "No valid CPU to hand over threads to");
+            panic_abort();
+        }
+        spinlock_release(&info->queue_lock);
         spinlock_release(&info->run_lock);
 
         // Power off this CPU.
@@ -169,10 +136,7 @@ static void sw_handle_sched_flags(timestamp_us_t now, int cur_cpu, sched_cpuloca
 }
 
 // Measure load on this CPU.
-static void sw_measure_load(timestamp_us_t now, int cur_cpu, sched_cpulocal_t *info) {
-    (void)now;
-    (void)cur_cpu;
-
+static void sw_measure_load(sched_cpulocal_t *info) {
     // Measure time usage.
     timestamp_us_t  used_time = 0;
     sched_thread_t *thread    = (sched_thread_t *)info->queue.head;
@@ -199,50 +163,6 @@ static void sw_measure_load(timestamp_us_t now, int cur_cpu, sched_cpulocal_t *i
 
     info->load_average  = total_load;
     info->load_estimate = total_load;
-}
-
-// Perform load balancing.
-static void sw_handle_loadbalance(timestamp_us_t now, int cur_cpu, sched_cpulocal_t *info) {
-    (void)now;
-
-    // Wait for all CPUs to have measured their respective load.
-    atomic_fetch_add(&loadbalance_ready_count, 1);
-    int min = atomic_load(&running_sched_count);
-    while (atomic_load(&loadbalance_ready_count) < min) {
-        isr_pause();
-    }
-
-    // Measure global load average.
-    int global_load_average = 0;
-    for (int i = 0; i < smp_count; i++) {
-        global_load_average += cpu_ctx[i]->load_average;
-    }
-    global_load_average /= atomic_load(&running_sched_count);
-
-    // If this CPU started with less than the load average, don't hand off any threads.
-    if (info->load_average <= global_load_average) {
-        atomic_fetch_sub(&loadbalance_ready_count, 1);
-        return;
-    }
-
-    // Hand off threads until either all CPUs expect to meet the load average, or this one dips below.
-    sched_thread_t *thread;
-    for (size_t i = 0; i < info->queue.len; i++) {
-        thread          = (sched_thread_t *)dlist_pop_front(&info->queue);
-        bool handoff_ok = false;
-        for (int cpu = 0; cpu < smp_count; cpu++) {
-            if (cpu == cur_cpu)
-                continue;
-            if (thread_handoff(thread, cpu, false, global_load_average)) {
-                handoff_ok = true;
-                break;
-            }
-        }
-        if (!handoff_ok) {
-            dlist_append(&info->queue, &thread->node);
-        }
-    }
-    atomic_fetch_sub(&loadbalance_ready_count, 1);
 }
 
 // Requests the scheduler to prepare a switch from inside an interrupt routine.
@@ -272,30 +192,16 @@ void sched_request_switch_from_isr() {
 
     // Check for load measurement timer.
     // Ignored when timestamp is 0 in case timers aren't active yet.
-    // if (now && now >= info->load_measure_time && (sched_fl & SCHED_RUNNING)) {
-    //     // Measure load on this CPU.
-    //     sw_measure_load(now, cur_cpu, info);
-    //     // Balance load with other running CPUs.
-    //     sw_handle_loadbalance(now, cur_cpu, info);
+    if (now && now >= info->load_measure_time) {
+        // Measure load on this CPU.
+        sw_measure_load(info);
 
-    //     // Set next timestamp to measure load average.
-    //     info->load_measure_time = now + SCHED_LOAD_INTERVAL - (now % SCHED_LOAD_INTERVAL);
-    // }
-
-    // Check for incoming threads.
-    spinlock_take(&info->incoming_lock);
-    while (info->incoming.len) {
-        sched_thread_t *thread = (void *)dlist_pop_front(&info->incoming);
-        assert_dev_drop(atomic_load(&thread->flags) & THREAD_RUNNING);
-        if (atomic_load(&thread->flags) & THREAD_STARTNOW) {
-            dlist_prepend(&info->queue, &thread->node);
-        } else {
-            dlist_append(&info->queue, &thread->node);
-        }
+        // Set next timestamp to measure load average.
+        info->load_measure_time = now + SCHED_LOAD_INTERVAL - (now % SCHED_LOAD_INTERVAL);
     }
-    spinlock_release(&info->incoming_lock);
 
     // Check for runnable threads.
+    spinlock_take(&info->queue_lock);
     while (info->queue.len) {
         // Take the first thread.
         sched_thread_t *thread = (void *)dlist_pop_front(&info->queue);
@@ -321,6 +227,7 @@ void sched_request_switch_from_isr() {
             do {
                 if (!((flags & THREAD_KSUSPEND) || !(flags & THREAD_PRIVILEGED)) || !(flags & THREAD_SUSPENDING)) {
                     // Suspend cancelled; set as switch target.
+                    spinlock_release(&info->queue_lock);
                     set_switch(info, thread);
                     return;
                 }
@@ -331,10 +238,12 @@ void sched_request_switch_from_isr() {
             // Runnable thread found; perform context switch.
             assert_dev_drop(flags & THREAD_RUNNING);
             dlist_append(&info->queue, &thread->node);
+            spinlock_release(&info->queue_lock);
             set_switch(info, thread);
             return;
         }
     }
+    spinlock_release(&info->queue_lock);
 
     // If nothing is running on this CPU, run the idle thread.
     set_switch(info, &info->idle_thread);
@@ -398,9 +307,39 @@ static void sched_housekeeping(int taskno, void *arg) {
 // Idle function ran when a CPU has no threads.
 static void idle_func(void *arg) {
     (void)arg;
+    timestamp_us_t    lim  = 1000000 + 200000 * smp_cur_cpu();
+    sched_cpulocal_t *info = isr_ctx_get()->cpulocal->sched;
     while (1) {
-        isr_pause();
+        timestamp_us_t now = time_us();
+
+        // Try to steal work from other CPUs.
+        for (int cpu = 0; cpu < smp_count; cpu++) {
+            irq_disable();
+            spinlock_take(&cpu_ctx[cpu]->queue_lock);
+            sched_thread_t *head = (sched_thread_t *)cpu_ctx[cpu]->queue.head;
+
+            if (cpu_ctx[cpu]->queue.len >= 2 && head->last_migration + SCHED_WORK_STEAL_INTERVAL < now) {
+                // Eligible thread found; remove from queue.
+                dlist_pop_front(&cpu_ctx[cpu]->queue);
+                spinlock_release(&cpu_ctx[cpu]->queue_lock);
+
+                // Add to local queue.
+                spinlock_take(&info->queue_lock);
+                dlist_prepend(&info->queue, &head->node);
+                spinlock_release(&info->queue_lock);
+                head->last_migration = now;
+
+                // Break to yield and hopefully start the thread.
+                irq_enable();
+                break;
+            }
+
+            spinlock_release(&cpu_ctx[cpu]->queue_lock);
+            irq_enable();
+        }
+
         thread_yield();
+        isr_pause();
     }
 }
 
@@ -422,12 +361,6 @@ void sched_start_altcpus() {
     }
 }
 
-// A combination of `sched_init_cpu` for this CPU and `sched_exec`.
-NORETURN static void sched_init_and_exec() {
-    sched_init_cpu(smp_cur_cpu());
-    sched_exec();
-}
-
 // Power on and start scheduler on another CPU.
 bool sched_start_on(int cpu) {
     static mutex_t start_mutex = MUTEX_T_INIT;
@@ -436,7 +369,7 @@ bool sched_start_on(int cpu) {
     // Tell SMP to power on the other CPU.
     sched_init_cpu(cpu);
     void *tmp_stack  = malloc(CONFIG_STACK_SIZE);
-    bool  poweron_ok = smp_poweron(cpu, sched_init_and_exec, tmp_stack + CONFIG_STACK_SIZE);
+    bool  poweron_ok = smp_poweron(cpu, sched_exec, tmp_stack + CONFIG_STACK_SIZE);
     if (poweron_ok) {
         mutex_acquire(NULL, &log_mtx, TIMESTAMP_US_MAX);
         while (!(atomic_load(&cpu_ctx[cpu]->flags) & SCHED_RUNNING)) continue;
@@ -456,9 +389,15 @@ void sched_init_cpu(int cpu) {
     sched_cpulocal_t *info = calloc(1, sizeof(sched_cpulocal_t));
 
     // Prepare CPU-local data.
-    cpu_ctx[cpu]        = info;
-    info->run_lock      = SPINLOCK_T_INIT_SHARED;
-    info->incoming_lock = SPINLOCK_T_INIT_SHARED;
+    // TODO: There is no good way to detect whether a scheduler exists on a CPU because of this line.
+    // It isn't protected by anything and fills out an important pointer.
+    // Maybe use an atomic integer to store whether a scheduler is up?
+    // Even that isn't a perfect solution because in the future, BadgerOS needs to support shutting down schedulers on a
+    // subset of the CPUs. It might even be necessary to statically allocate the flags and spinlocks, or to allocate the
+    // CPU contexts once on `sched_start_altcpus` (before any secondary CPUs are brought up) and never clean them.
+    cpu_ctx[cpu]     = info;
+    info->run_lock   = SPINLOCK_T_INIT_SHARED;
+    info->queue_lock = SPINLOCK_T_INIT_SHARED;
 
     // Prepare idle thread.
     void *stack = malloc(8192);
@@ -475,7 +414,7 @@ void sched_init_cpu(int cpu) {
 
 // Thread function that reports the scheduler to be up and exits.
 static int sched_up_reporter(void *ctx) {
-    logkf_from_isr(LOG_INFO, "Scheduler started on CPU%{d}", (int)(size_t)ctx);
+    logkf(LOG_INFO, "Scheduler started on CPU%{d}", (int)(size_t)ctx);
     return 0;
 }
 
@@ -732,7 +671,7 @@ bool thread_unblock(tid_t tid, uint64_t ticket) {
                    ((flags = atomic_fetch_and(&thread->flags, ~THREAD_BLOCKED)) & THREAD_BLOCKED);
     if (success) {
         assert_dev_drop(ticket == thread->blocking_ticket);
-        thread_handoff(thread, thread->unblock_cpu, true, 0);
+        thread_handoff(thread, thread->unblock_cpu);
     }
 
     spinlock_release_shared(&threads_lock);
@@ -814,7 +753,7 @@ static void thread_resume_impl(badge_err_t *ec, tid_t tid, bool now) {
     sched_thread_t *thread = find_thread(tid);
     if (thread) {
         if (thread_try_mark_running(thread, now)) {
-            thread_handoff(thread, smp_cur_cpu(), true, 0);
+            thread_handoff(thread, smp_cur_cpu());
         }
         badge_err_set_ok(ec);
     } else {

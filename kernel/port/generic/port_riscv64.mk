@@ -68,6 +68,7 @@ clean-image:
 .PHONY: qemu
 qemu: $(BUILDDIR)/cache/OVMF.fd image
 	$(QEMU) -s \
+		-icount shift=auto,sleep=off -rtc clock=vm,base=utc \
 		-M virt,acpi=off -cpu rv64,sv48=false -smp 4 -m 4G \
 		-device pcie-root-port,bus=pcie.0,id=pcisw0 \
 		-device qemu-xhci,bus=pcisw0 -device usb-kbd \

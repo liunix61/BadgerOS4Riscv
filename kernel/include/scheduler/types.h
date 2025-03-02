@@ -17,11 +17,13 @@
 #include <stdint.h>
 
 // The minimum time a thread will run. `SCHED_PRIO_LOW` maps to this.
-#define SCHED_MIN_US        5000
+#define SCHED_MIN_US              5000
 // The time quota increment per increased priority.
-#define SCHED_INC_US        500
+#define SCHED_INC_US              500
 // The microsecond interval on which schedulers measure CPU load.
-#define SCHED_LOAD_INTERVAL 250000
+#define SCHED_LOAD_INTERVAL       250000
+// The minimum amount of microseconds that must pass before a thread is allowed to be migrated by work stealing.
+#define SCHED_WORK_STEAL_INTERVAL 50000
 
 
 
@@ -61,15 +63,17 @@ struct sched_thread_t {
     dlist_node_t node;
 
     // Process to which this thread belongs.
-    process_t  *process;
+    process_t     *process;
     // Lowest address of the kernel stack.
-    size_t      kernel_stack_bottom;
+    size_t         kernel_stack_bottom;
     // Highest address of the kernel stack.
-    size_t      kernel_stack_top;
+    size_t         kernel_stack_top;
     // Priority of this thread.
-    int         priority;
+    int            priority;
     // Time usage information.
-    timeusage_t timeusage;
+    timeusage_t    timeusage;
+    // Last timestamp at which thread was migrated.
+    timestamp_us_t last_migration;
 
     // Thread flags.
     atomic_int flags;
@@ -93,12 +97,10 @@ struct sched_thread_t {
 
 // CPU-local scheduler data.
 struct sched_cpulocal_t {
-    // Scheduler start/stop mutex.
+    // Scheduler start/stop spinlock.
     spinlock_t     run_lock;
-    // Incoming threads list mutex.
-    spinlock_t     incoming_lock;
-    // Threads pending handover to this CPU.
-    dlist_t        incoming;
+    // Threads list spinlock.
+    spinlock_t     queue_lock;
     // CPU-local thread queue.
     dlist_t        queue;
     // CPU-local scheduler state flags.
