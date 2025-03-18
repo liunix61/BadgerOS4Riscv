@@ -108,3 +108,6 @@ bool thread_is_running(badge_err_t *ec, tid_t thread);
 void thread_exit(int code) NORETURN;
 // Wait for another thread to exit.
 void thread_join(tid_t thread);
+
+// Dump scheduler state for debug purposes.
+void sched_debug_print();

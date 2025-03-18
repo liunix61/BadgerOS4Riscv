@@ -51,11 +51,13 @@
 #define THREAD_BLOCKED    (1 << 10)
 
 // The scheduler is starting on this CPU.
-#define SCHED_STARTING (1 << 0)
+#define SCHED_STARTING  (1 << 0)
 // The scheduler is running on this CPU.
-#define SCHED_RUNNING  (1 << 1)
+#define SCHED_RUNNING   (1 << 1)
 // The scheduler is pending exit on this CPU.
-#define SCHED_EXITING  (1 << 2)
+#define SCHED_EXITING   (1 << 2)
+// The scheduler will dump the current scheduler state now.
+#define SCHED_DUMPSTATE (1 << 3)
 
 // Thread struct.
 struct sched_thread_t {

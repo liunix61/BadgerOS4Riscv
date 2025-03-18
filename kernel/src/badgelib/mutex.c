@@ -121,10 +121,13 @@ static inline bool thresh_add_atomic_int(mutex_t *mutex, timestamp_us_t timeout,
         if (!(old_value >= threshold || new_value >= threshold) &&
             atomic_compare_exchange_weak_explicit(&mutex->shares, &old_value, new_value, order, memory_order_relaxed)) {
             return true;
-        } else if (loops) {
-            loops--;
         } else {
-            mutex_block(mutex, timeout, old_value);
+            if (loops) {
+                loops--;
+            } else {
+                mutex_block(mutex, timeout, old_value);
+            }
+            old_value = atomic_load(&mutex->shares);
         }
     } while (time_us() < timeout);
     return false;

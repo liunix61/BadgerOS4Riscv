@@ -24,6 +24,8 @@
 
 // Number of CPUs with running schedulers.
 static atomic_int        running_sched_count;
+// Maximum CPU to check for work stealing / handoff.
+static atomic_int        max_cpu_up = 1;
 // CPU-local scheduler structs.
 static sched_cpulocal_t *cpu_ctx[64];
 // Threads list mutex.
@@ -96,6 +98,11 @@ static void set_switch(sched_cpulocal_t *info, sched_thread_t *thread) {
 static void sw_handle_sched_flags(timestamp_us_t now, int cur_cpu, sched_cpulocal_t *info, int sched_fl) {
     (void)now;
 
+    if (sched_fl & SCHED_DUMPSTATE) {
+        sched_debug_print();
+        atomic_fetch_and_explicit(&info->flags, ~SCHED_DUMPSTATE, memory_order_relaxed);
+    }
+
     if (!(sched_fl & (SCHED_RUNNING | SCHED_STARTING))) {
         // Mark as starting in the first cycle.
         atomic_fetch_or(&info->flags, SCHED_STARTING);
@@ -115,7 +122,8 @@ static void sw_handle_sched_flags(timestamp_us_t now, int cur_cpu, sched_cpuloca
 
         // Hand all threads over to other CPUs.
         spinlock_take(&info->queue_lock);
-        for (int cpu = 0; info->queue.len && cpu < smp_count; cpu++) {
+        int max = atomic_load_explicit(&max_cpu_up, memory_order_acquire);
+        for (int cpu = 0; info->queue.len && cpu < max; cpu++) {
             spinlock_take(&cpu_ctx[cpu]->queue_lock);
             if (atomic_load_explicit(&cpu_ctx[cpu]->flags, memory_order_relaxed) & SCHED_RUNNING) {
                 // This CPU has a running scheduler and we can simply dump all threads there.
@@ -168,6 +176,7 @@ static void sw_measure_load(sched_cpulocal_t *info) {
 // Requests the scheduler to prepare a switch from inside an interrupt routine.
 void sched_request_switch_from_isr() {
     check_for_panic();
+    assert_dev_drop(!irq_is_enabled());
     timestamp_us_t    now     = time_us();
     int               cur_cpu = smp_cur_cpu();
     sched_cpulocal_t *info    = cpu_ctx[cur_cpu];
@@ -227,6 +236,7 @@ void sched_request_switch_from_isr() {
             do {
                 if (!((flags & THREAD_KSUSPEND) || !(flags & THREAD_PRIVILEGED)) || !(flags & THREAD_SUSPENDING)) {
                     // Suspend cancelled; set as switch target.
+                    dlist_append(&info->queue, &thread->node);
                     spinlock_release(&info->queue_lock);
                     set_switch(info, thread);
                     return;
@@ -307,13 +317,18 @@ static void sched_housekeeping(int taskno, void *arg) {
 // Idle function ran when a CPU has no threads.
 static void idle_func(void *arg) {
     (void)arg;
-    timestamp_us_t    lim  = 1000000 + 200000 * smp_cur_cpu();
-    sched_cpulocal_t *info = isr_ctx_get()->cpulocal->sched;
+    timestamp_us_t    lim      = 1000000 + 200000 * smp_cur_cpu();
+    sched_cpulocal_t *info     = isr_ctx_get()->cpulocal->sched;
+    int               this_cpu = smp_cur_cpu();
     while (1) {
         timestamp_us_t now = time_us();
 
         // Try to steal work from other CPUs.
-        for (int cpu = 0; cpu < smp_count; cpu++) {
+        int max = atomic_load_explicit(&max_cpu_up, memory_order_acquire);
+        for (int cpu = 0; cpu < max; cpu++) {
+            if (cpu == this_cpu) {
+                continue;
+            }
             irq_disable();
             spinlock_take(&cpu_ctx[cpu]->queue_lock);
             sched_thread_t *head = (sched_thread_t *)cpu_ctx[cpu]->queue.head;
@@ -321,13 +336,13 @@ static void idle_func(void *arg) {
             if (cpu_ctx[cpu]->queue.len >= 2 && head->last_migration + SCHED_WORK_STEAL_INTERVAL < now) {
                 // Eligible thread found; remove from queue.
                 dlist_pop_front(&cpu_ctx[cpu]->queue);
+                head->last_migration = now;
                 spinlock_release(&cpu_ctx[cpu]->queue_lock);
 
                 // Add to local queue.
                 spinlock_take(&info->queue_lock);
                 dlist_prepend(&info->queue, &head->node);
                 spinlock_release(&info->queue_lock);
-                head->last_migration = now;
 
                 // Break to yield and hopefully start the thread.
                 irq_enable();
@@ -355,6 +370,12 @@ void sched_start_altcpus() {
         logkf(LOG_INFO, "Starting scheduler on %{d} alt CPU(s)", smp_count - 1);
         for (int i = 0; i < smp_count; i++) {
             if (i != cpu) {
+                sched_init_cpu(i);
+            }
+        }
+        atomic_store_explicit(&max_cpu_up, smp_count, memory_order_release);
+        for (int i = 0; i < smp_count; i++) {
+            if (i != cpu) {
                 sched_start_on(i);
             }
         }
@@ -367,7 +388,6 @@ bool sched_start_on(int cpu) {
     mutex_acquire(NULL, &start_mutex, TIMESTAMP_US_MAX);
 
     // Tell SMP to power on the other CPU.
-    sched_init_cpu(cpu);
     void *tmp_stack  = malloc(CONFIG_STACK_SIZE);
     bool  poweron_ok = smp_poweron(cpu, sched_exec, tmp_stack + CONFIG_STACK_SIZE);
     if (poweron_ok) {
@@ -428,6 +448,7 @@ NORETURN void sched_exec() {
     isr_ctx_get()->cpulocal->sched = info;
     tid_t tid = thread_new_kernel(NULL, NULL, sched_up_reporter, (void *)(size_t)cpu, SCHED_PRIO_NORMAL);
     thread_resume_now(NULL, tid);
+    thread_detach(NULL, tid);
 
     // Set next timestamp to measure load average.
     info->load_average      = 0;
@@ -591,7 +612,7 @@ tid_t thread_new_kernel(badge_err_t *ec, char const *name, sched_entry_t entrypo
 
 // Do not wait for thread to be joined; clean up immediately.
 void thread_detach(badge_err_t *ec, tid_t tid) {
-    irq_disable();
+    bool ie = irq_disable();
     spinlock_take_shared(&threads_lock);
     sched_thread_t *thread = find_thread(tid);
     if (thread) {
@@ -601,7 +622,7 @@ void thread_detach(badge_err_t *ec, tid_t tid) {
         badge_err_set(ec, ELOC_THREADS, ECAUSE_NOTFOUND);
     }
     spinlock_release_shared(&threads_lock);
-    irq_enable();
+    irq_enable_if(ie);
 }
 
 
@@ -840,4 +861,61 @@ void thread_join(tid_t tid) {
         // No need to re-enable IRQs because the yield implicitly does so.
         thread_yield();
     }
+}
+
+
+
+// Dump scheduler state for debug purposes.
+void sched_debug_print() {
+    bool ie      = irq_disable();
+    int  max_cpu = atomic_load(&max_cpu_up);
+    spinlock_take(&threads_lock);
+
+    for (int cpu = 0; cpu < max_cpu; cpu++) {
+        spinlock_take(&cpu_ctx[cpu]->queue_lock);
+    }
+
+    logkf_from_isr(LOG_DEBUG, "%{size;d} threads:", threads_len);
+    for (size_t i = 0; i < threads_len; i++) {
+#ifdef __riscv
+#define PC_REG pc
+#else
+#define PC_REG rip
+#endif
+        if (threads[i]->name) {
+            logkf_from_isr(
+                LOG_DEBUG,
+                "  %{d} FLAGS=0x%{x} PC=0x%{size;x} \"%{cs}\"",
+                threads[i]->id,
+                threads[i]->flags,
+                threads[i]->kernel_isr_ctx.regs.PC_REG,
+                threads[i]->name
+            );
+        } else {
+            logkf_from_isr(
+                LOG_DEBUG,
+                "  %{d} FLAGS=0x%{x} PC=0x%{size;x}",
+                threads[i]->id,
+                threads[i]->flags,
+                threads[i]->kernel_isr_ctx.regs.PC_REG
+            );
+        }
+#undef PC_REG
+    }
+
+    for (int cpu = 0; cpu < max_cpu; cpu++) {
+        logkf_from_isr(LOG_DEBUG, "CPU%{d} has %{size;d} threads:", cpu, cpu_ctx[cpu]->queue.len);
+        sched_thread_t *cur = (sched_thread_t *)cpu_ctx[cpu]->queue.head;
+        while (cur) {
+            logkf_from_isr(LOG_DEBUG, "  %{d}", cur->id);
+            cur = (sched_thread_t *)cur->node.next;
+        }
+    }
+
+    for (int cpu = 0; cpu < max_cpu; cpu++) {
+        spinlock_release(&cpu_ctx[cpu]->queue_lock);
+    }
+
+    spinlock_release(&threads_lock);
+    irq_enable_if(ie);
 }
