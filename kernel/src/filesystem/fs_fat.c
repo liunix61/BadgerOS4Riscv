@@ -735,7 +735,7 @@ static void
 
     // Preserve NULL terminating entry.
     uint8_t const zero = 0;
-    if (cur == 0 && (index + 1) * sizeof(fat_dirent_t) < dir->size) {
+    if (cur == 0 && (fileoff_t)((index + 1) * sizeof(fat_dirent_t)) < dir->size) {
         fs_fat_file_write(ec, vfs, dir, (index + 1) * sizeof(fat_dirent_t), &zero, 1);
         if (!badge_err_is_ok(ec)) {
             return;
@@ -1264,7 +1264,7 @@ void fs_fat_file_resize(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fileo
         buf[3] = FATFILE(file).clusters[0] >> 24;
     }
 
-    if (file->links && !new_clusters && old_clusters || !old_clusters && new_clusters) {
+    if ((file->links && !new_clusters && old_clusters) || (!old_clusters && new_clusters)) {
         // Update first cluster field unless the file is unlinked (it would have no dirent).
         fs_fat_file_write(
             ec,

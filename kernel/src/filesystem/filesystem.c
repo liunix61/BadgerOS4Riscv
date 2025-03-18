@@ -183,7 +183,7 @@ static vfs_file_desc_t *get_dir_fd_ptr(badge_err_t *ec, file_t fileno) {
         }
         return NULL;
     } else {
-        badge_err_is_ok(ec);
+        badge_err_set_ok(ec);
     }
     return fd;
 }
@@ -327,7 +327,7 @@ void fs_umount(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
 // Try to identify the filesystem stored in the block device
 // Returns `NULL` on error or if the filesystem is unknown.
 char const *fs_detect(badge_err_t *ec, blkdev_t *media) {
-    for (fs_driver_t *driver = __start_fsdrivers; driver != __stop_fsdrivers; driver++) {
+    for (fs_driver_t const *driver = __start_fsdrivers; driver != __stop_fsdrivers; driver++) {
         if (driver->detect && driver->detect(ec, media)) {
             return driver->id;
         }
