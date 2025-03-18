@@ -66,6 +66,7 @@ set(target badger-os.elf)
 add_executable(${target}
     ${CMAKE_CURRENT_LIST_DIR}/build/fs_root.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/badge_format_str.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/fifo.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/log.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/mutex.c
     ${CMAKE_CURRENT_LIST_DIR}/src/badgelib/num_to_str.c
