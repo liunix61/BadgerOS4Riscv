@@ -41,10 +41,18 @@ typedef uint32_t mountflags_t;
 #define OFLAGS_CLOEXEC   0x00000040
 // Open a directory instead of a file.
 #define OFLAGS_DIRECTORY 0x00000080
+// Do not block on sockets, FIFOs, TTYs, etc.
+#define OFLAGS_NONBLOCK  0x00000100
+
+// Bitmask of filesystem open flags that only the kernel may apply.
+#define KOFLAGS_MASK    0xffff0000
+// Kernel-only flag: Open for execution.
+#define KOFLAGS_EXECUTE 0x00010000
 
 // Bitmask of all opening flags valid without the use of `OFLAGS_DIRECTORY` and without the use of `OFLAGS_EXCLUSIVE`.
 #define VALID_OFLAGS_FILE                                                                                              \
-    (OFLAGS_READWRITE | OFLAGS_APPEND | OFLAGS_TRUNCATE | OFLAGS_CREATE | OFLAGS_EXCLUSIVE | OFLAGS_CLOEXEC)
+    (OFLAGS_READWRITE | OFLAGS_APPEND | OFLAGS_TRUNCATE | OFLAGS_CREATE | OFLAGS_EXCLUSIVE | OFLAGS_CLOEXEC |          \
+     OFLAGS_NONBLOCK | KOFLAGS_EXECUTE)
 // Bitmask of all opening flags valid in conjunction with `OFLAGS_DIRECTORY`.
 #define VALID_OFLAGS_DIRECTORY (OFLAGS_DIRECTORY | OFLAGS_CREATE | OFLAGS_EXCLUSIVE | OFLAGS_READONLY | OFLAGS_CLOEXEC)
 
@@ -218,6 +226,9 @@ void fs_symlink(
     char const  *link_path,
     size_t       link_path_len
 );
+// Create a new named FIFO at a path relative to a dir handle.
+// If `at` is `FILE_NONE`, it is relative to the root dir.
+void fs_mkfifo(badge_err_t *ec, file_t at, char const *path, size_t path_len);
 
 // Close a file opened by `fs_open`.
 // Only raises an error if `file` is an invalid file descriptor or an I/O error occurs.

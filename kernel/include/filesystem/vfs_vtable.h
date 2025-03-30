@@ -30,9 +30,28 @@ typedef void (*vfs_unlink_t)(
 typedef void (*vfs_rmdir_t)(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
 );
-// Test for the existence of a file in the given directory.
-// If `dir` is NULL, the root directory is used.
-typedef bool (*vfs_exists_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
+// Create a new hard link from one path to another relative to their respective dirs.
+// Fails if `old_path` names a directory.
+typedef void (*vfs_link_t)(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    vfs_file_obj_t *old_obj,
+    vfs_file_obj_t *new_dir,
+    char const     *new_name,
+    size_t          new_name_len
+);
+// Create a new symbolic link from one path to another, the latter relative to a dir handle.
+typedef void (*vfs_symlink_t)(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    char const     *target_path,
+    size_t          target_path_len,
+    vfs_file_obj_t *link_dir,
+    char const     *link_name,
+    size_t          link_name_len
+);
+// Create a new named FIFO at a path relative to a dir handle.
+typedef void (*vfs_mkfifo_t)(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
 
 // Atomically read all directory entries and cache them into the directory handle.
 // Refer to `dirent_t` for the structure of the cache.
@@ -82,7 +101,9 @@ typedef struct {
     vfs_create_dir_t   create_dir;
     vfs_unlink_t       unlink;
     vfs_rmdir_t        rmdir;
-    vfs_exists_t       exists;
+    vfs_link_t         link;
+    vfs_symlink_t      symlink;
+    vfs_mkfifo_t       mkfifo;
     vfs_dir_read_t     dir_read;
     vfs_dir_find_ent_t dir_find_ent;
     vfs_stat_t         stat;

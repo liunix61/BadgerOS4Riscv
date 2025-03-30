@@ -4,6 +4,7 @@
 #include "filesystem/vfs_internal.h"
 
 #include "arrays.h"
+#include "filesystem/vfs_fifo.h"
 #include "malloc.h"
 
 
@@ -248,6 +249,11 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     dir->vfs->vtable.file_open(ec, dir->vfs, dir, fobj, name, name_len);
     if (!badge_err_is_ok(ec)) {
         goto err2;
+    }
+
+    if (fobj->type == FILETYPE_FIFO) {
+        // FIFO object created here, open will be called by the file desc code.
+        fobj->fifo = vfs_fifo_create();
     }
 
     mutex_release(NULL, &objs_mtx);

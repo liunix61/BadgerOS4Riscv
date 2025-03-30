@@ -40,6 +40,8 @@ typedef struct {
     uint16_t mode;
     // Number of hard links.
     size_t   links;
+    // Whether the file handle is open.
+    bool     open;
     // Owner user ID.
     int      uid;
     // Owner group ID.

@@ -45,8 +45,27 @@ void fs_fat_create_dir(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char co
 void fs_fat_unlink(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
 );
-// Test for the existence of a file in the given directory.
-bool fs_fat_exists(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
+// FAT doesn't support this; raises ECAUSE_UNSUPPORTED.
+void fs_fat_link(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    vfs_file_obj_t *old_obj,
+    vfs_file_obj_t *new_dir,
+    char const     *new_name,
+    size_t          new_name_len
+);
+// FAT doesn't support this; raises ECAUSE_UNSUPPORTED.
+void fs_fat_symlink(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    char const     *target_path,
+    size_t          target_path_len,
+    vfs_file_obj_t *link_dir,
+    char const     *link_name,
+    size_t          link_name_len
+);
+// FAT doesn't support this; raises ECAUSE_UNSUPPORTED.
+void fs_fat_mkfifo(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
 
 // Read all entries from a directory.
 dirent_list_t fs_fat_dir_read(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir);

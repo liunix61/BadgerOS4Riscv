@@ -29,9 +29,28 @@ void fs_ramfs_create_dir(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char 
 void fs_ramfs_unlink(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len, vfs_file_obj_t *file
 );
-// Test for the existence of a file in the given directory.
-// If `dir` is NULL, the root directory is used.
-bool fs_ramfs_exists(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
+// Create a new hard link from one path to another relative to their respective dirs.
+// Fails if `old_path` names a directory.
+void fs_ramfs_link(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    vfs_file_obj_t *old_obj,
+    vfs_file_obj_t *new_dir,
+    char const     *new_name,
+    size_t          new_name_len
+);
+// Create a new symbolic link from one path to another, the latter relative to a dir handle.
+void fs_ramfs_symlink(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    char const     *target_path,
+    size_t          target_path_len,
+    vfs_file_obj_t *link_dir,
+    char const     *link_name,
+    size_t          link_name_len
+);
+// Create a new named FIFO at a path relative to a dir handle.
+void fs_ramfs_mkfifo(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len);
 
 // Read all entries from a directory.
 dirent_list_t fs_ramfs_dir_read(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir);

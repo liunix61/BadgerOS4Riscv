@@ -4,6 +4,7 @@
 #include "arrays.h"
 #include "assertions.h"
 #include "badge_strings.h"
+#include "filesystem/vfs_fifo.h"
 #include "filesystem/vfs_internal.h"
 #include "filesystem/vfs_vtable.h"
 #include "log.h"
@@ -58,6 +59,7 @@ static int vfs_file_desc_id_search(void const *a_ptr, void const *b_ptr) {
 }
 
 // Walk the filesystem over a certain path.
+// Opens the target file or directory if it exists.
 static walk_t walk(badge_err_t *ec, vfs_file_obj_t *dirfd, char const *path, size_t path_len, bool no_follow_symlink) {
     if (path[0] == '/') {
         // TODO: chroot support?
@@ -435,6 +437,9 @@ dirent_list_t fs_dir_read(badge_err_t *ec, file_t dir) {
 // Open a file for reading and/or writing relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
 file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, oflags_t oflags) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
+
     if (!root_mounted) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
         logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
@@ -516,12 +521,28 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
         return FILE_NONE;
     }
 
+    if (res.file->type == FILETYPE_FIFO) {
+        // Open the FIFO before finishing the handle creation.
+        vfs_fifo_open(
+            ec,
+            res.file->fifo,
+            oflags & OFLAGS_NONBLOCK,
+            oflags & OFLAGS_READONLY,
+            oflags & OFLAGS_WRITEONLY
+        );
+        if (!badge_err_is_ok(ec)) {
+            vfs_file_drop_ref(NULL, res.file);
+            return FILE_NONE;
+        }
+    }
+
     // Create new file handle.
     vfs_file_desc_t *fd = calloc(1, sizeof(vfs_file_desc_t));
     fd->obj             = res.file;
     fd->read            = oflags & OFLAGS_READONLY;
     fd->write           = oflags & OFLAGS_WRITEONLY;
     fd->append          = oflags & OFLAGS_APPEND;
+    fd->nonblock        = oflags & OFLAGS_NONBLOCK;
     atomic_store_explicit(&fd->refcount, 1, memory_order_release);
 
     mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
@@ -529,7 +550,7 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
     // Insert handle into files array.
     if (!array_lencap_sorted_insert(&files, sizeof(void *), &files_len, &files_cap, &fd, vfs_file_desc_id_cmp)) {
         mutex_release(NULL, &files_mtx);
-        vfs_file_drop_ref(ec, fd->obj);
+        vfs_file_drop_ref(NULL, fd->obj);
         free(fd);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
         return FILE_NONE;
@@ -734,6 +755,9 @@ void fs_close(badge_err_t *ec, file_t file) {
     if (res.found) {
         vfs_file_desc_t *fd = files[res.index];
         array_lencap_remove(&files, sizeof(void *), &files_len, &files_cap, NULL, res.index);
+        if (fd->obj->type == FILETYPE_FIFO) {
+            vfs_fifo_close(fd->obj->fifo, fd->read, fd->write);
+        }
         mutex_release(NULL, &files_mtx);
         fd_drop_ref(ec, fd);
         badge_err_set_ok(ec);
@@ -757,19 +781,34 @@ fileoff_t fs_read(badge_err_t *ec, file_t file, void *readbuf, fileoff_t readlen
         return -1;
     }
 
-    mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
-    fileoff_t offset = fd->offset;
-    if (offset > fd->obj->size) {
-        offset = fd->obj->size;
+    if (fd->obj->type == FILETYPE_FIFO && fd->nonblock) {
+        // Non-blocking FIFO reads will get as much data as is available.
+        return vfs_fifo_read(ec, fd->obj->fifo, true, readbuf, readlen);
+
+    } else if (fd->obj->type == FILETYPE_FIFO) {
+        // Blocking FIFO reads will wait until at least one byte is read.
+        fileoff_t read;
+        do {
+            read = vfs_fifo_read(ec, fd->obj->fifo, false, readbuf, readlen);
+        } while (read == 0);
+        return read;
+
+    } else {
+        // Regular file reads.
+        mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+        fileoff_t offset = fd->offset;
+        if (offset > fd->obj->size) {
+            offset = fd->obj->size;
+        }
+        if (offset + readlen > fd->obj->size) {
+            readlen = fd->obj->size - offset;
+        }
+        vfs_file_read(ec, fd->obj, offset, readbuf, readlen);
+        if (badge_err_is_ok(ec)) {
+            fd->offset = offset + readlen;
+        }
+        mutex_release_shared(NULL, &fd->obj->mutex);
     }
-    if (offset + readlen > fd->obj->size) {
-        readlen = fd->obj->size - offset;
-    }
-    vfs_file_read(ec, fd->obj, offset, readbuf, readlen);
-    if (badge_err_is_ok(ec)) {
-        fd->offset = offset + readlen;
-    }
-    mutex_release_shared(NULL, &fd->obj->mutex);
 
     fd_drop_ref(ec, fd);
     return readlen;
@@ -796,7 +835,28 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
     badge_err_t ec0 = {0};
     ec              = ec ?: &ec0;
 
-    if (fd->append) {
+    if (fd->obj->type == FILETYPE_FIFO && fd->nonblock) {
+        // Non-blocking FIFO writes send as much data as is possible without blocking.
+        return vfs_fifo_write(ec, fd->obj->fifo, true, false, writebuf, writelen);
+
+    } else if (fd->obj->type == FILETYPE_FIFO) {
+        // Blocking FIFO writes block until all data is written,
+        // Or set the error code to ECAUSE_PIPE_CLOSED if the FIFO closes midway.
+        fileoff_t total_written = 0;
+        bool      enforce_open  = false;
+        while (writelen) {
+            fileoff_t written = vfs_fifo_write(ec, fd->obj->fifo, fd->nonblock, enforce_open, writebuf, writelen);
+            if (!badge_err_is_ok(ec)) {
+                break;
+            }
+            writebuf       = (uint8_t const *)writebuf + written;
+            writelen      -= written;
+            total_written += written;
+            enforce_open   = true;
+        }
+        return total_written;
+
+    } else if (fd->append) {
         // Append writes are atomic and require exclusive locking.
         mutex_acquire(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
         fd->offset       = fd->obj->size;
@@ -867,6 +927,10 @@ fileoff_t fs_tell(badge_err_t *ec, file_t file) {
     if (!fd) {
         return -1;
     }
+    if (fd->obj->type == FILETYPE_FIFO) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSEEKABLE);
+        return -1;
+    }
     mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
     fileoff_t tmp = fd->offset;
     if (tmp > fd->obj->size) {
@@ -882,6 +946,10 @@ fileoff_t fs_tell(badge_err_t *ec, file_t file) {
 fileoff_t fs_seek(badge_err_t *ec, file_t file, fileoff_t off, fs_seek_t seekmode) {
     vfs_file_desc_t *fd = get_file_fd_ptr(ec, file);
     if (!fd) {
+        return -1;
+    }
+    if (fd->obj->type == FILETYPE_FIFO) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSEEKABLE);
         return -1;
     }
     mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);

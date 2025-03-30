@@ -64,7 +64,7 @@ static ptrdiff_t find_inode(vfs_t *vfs) {
 static void pop_inode_refcount(vfs_t *vfs, fs_ramfs_inode_t *inode) {
     // TODO: This needs a re-work for correct `unlink` semantics.
     inode->links--;
-    if (inode->links == 0) {
+    if (inode->links == 0 && !inode->open) {
         // Free inode.
         free(inode->buf);
         RAMFS(vfs).inode_usage[inode->inode] = false;
@@ -365,6 +365,75 @@ void fs_ramfs_unlink(
     mutex_release(NULL, &RAMFS(vfs).mtx);
 }
 
+// Create a new hard link from one path to another relative to their respective dirs.
+// Fails if `old_path` names a directory.
+void fs_ramfs_link(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    vfs_file_obj_t *old_obj,
+    vfs_file_obj_t *new_dir,
+    char const     *new_name,
+    size_t          new_name_len
+) {
+    if (new_name_len > VFS_RAMFS_NAME_MAX) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_TOOLONG);
+    }
+    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+
+    // Test whether the file already exists.
+    fs_ramfs_inode_t  *dirptr   = RAMFILE(new_dir);
+    fs_ramfs_dirent_t *existing = find_dirent(ec, vfs, dirptr, new_name, new_name_len);
+    if (existing) {
+        mutex_release(NULL, &RAMFS(vfs).mtx);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
+        return;
+    }
+
+    // Write a directory entry.
+    fs_ramfs_dirent_t ent = {
+        .size     = offsetof(fs_ramfs_dirent_t, name) + new_name_len + 1,
+        .name_len = new_name_len,
+        .inode    = old_obj->inode,
+    };
+    ent.size += (~ent.size + 1) % sizeof(size_t);
+    mem_copy(ent.name, new_name, new_name_len);
+    ent.name[new_name_len] = 0;
+
+    // Copy into the end of the directory.
+    if (insert_dirent(ec, vfs, dirptr, &ent)) {
+        // If successful, bump refcount.
+        RAMFILE(old_obj)->links++;
+    }
+
+    mutex_release(NULL, &RAMFS(vfs).mtx);
+}
+
+// Create a new symbolic link from one path to another, the latter relative to a dir handle.
+void fs_ramfs_symlink(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    char const     *target_path,
+    size_t          target_path_len,
+    vfs_file_obj_t *link_dir,
+    char const     *link_name,
+    size_t          link_name_len
+) {
+    fs_ramfs_inode_t *inode = create_file(ec, vfs, link_dir, link_name, link_name_len, FILETYPE_LINK);
+    if (!inode) {
+        return;
+    }
+    if (!resize_inode(ec, vfs, inode, target_path_len)) {
+        pop_inode_refcount(vfs, inode);
+        return;
+    }
+    mem_copy(inode->buf, target_path, target_path_len);
+}
+
+// Create a new named FIFO at a path relative to a dir handle.
+void fs_ramfs_mkfifo(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    create_file(ec, vfs, dir, name, name_len, FILETYPE_FIFO);
+}
+
 
 
 // Determine the record length for converting a RAMFS dirent to a BadgerOS dirent.
@@ -501,9 +570,9 @@ void fs_ramfs_file_open(
         return;
     }
 
-    // Increase refcount.
+    // Mark file as open.
     fs_ramfs_inode_t *iptr = &RAMFS(vfs).inode_list[ent->inode];
-    iptr->links++;
+    iptr->open             = true;
 
     // Install in shared file handle.
     RAMFILE(file)  = iptr;
@@ -521,7 +590,11 @@ void fs_ramfs_file_open(
 // Only raises an error if `file` is an invalid file descriptor.
 void fs_ramfs_file_close(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
     assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
-    pop_inode_refcount(vfs, RAMFILE(file));
+    fs_ramfs_inode_t *inode = RAMFILE(file);
+    if (inode->links == 0) {
+        free(inode->buf);
+        RAMFS(vfs).inode_usage[inode->inode] = false;
+    }
     mutex_release(NULL, &RAMFS(vfs).mtx);
     RAMFILE(file) = NULL;
     badge_err_set_ok(ec);
@@ -617,6 +690,9 @@ static vfs_vtable_t ramfs_vtable = {
     .create_file  = fs_ramfs_create_file,
     .create_dir   = fs_ramfs_create_dir,
     .unlink       = fs_ramfs_unlink,
+    .link         = fs_ramfs_link,
+    .symlink      = fs_ramfs_symlink,
+    .mkfifo       = fs_ramfs_mkfifo,
     .dir_read     = fs_ramfs_dir_read,
     .dir_find_ent = fs_ramfs_dir_find_ent,
     .root_open    = fs_ramfs_root_open,

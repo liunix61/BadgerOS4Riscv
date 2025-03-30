@@ -889,13 +889,50 @@ void fs_fat_unlink(
     fs_fat_file_write(ec, vfs, dir, sizeof(fat_dirent_t) * ent_no, &data, 1);
 }
 
-// Test for the existence of a file in the given directory.
-bool fs_fat_exists(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len) {
-    fat_dirent_t ent;
-    uint32_t     ent_no;
-    return find_fat_dirent(ec, vfs, dir, name, name_len, &ent, &ent_no);
+// FAT doesn't support this; raises ECAUSE_UNSUPPORTED.
+void fs_fat_link(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    vfs_file_obj_t *old_obj,
+    vfs_file_obj_t *new_dir,
+    char const     *new_name,
+    size_t          new_name_len
+) {
+    (void)vfs;
+    (void)old_obj;
+    (void)new_dir;
+    (void)new_name;
+    (void)new_name_len;
+    badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSUPPORTED);
 }
 
+// FAT doesn't support this; raises ECAUSE_UNSUPPORTED.
+void fs_fat_symlink(
+    badge_err_t    *ec,
+    vfs_t          *vfs,
+    char const     *target_path,
+    size_t          target_path_len,
+    vfs_file_obj_t *link_dir,
+    char const     *link_name,
+    size_t          link_name_len
+) {
+    (void)vfs;
+    (void)target_path;
+    (void)target_path_len;
+    (void)link_dir;
+    (void)link_name;
+    (void)link_name_len;
+    badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSUPPORTED);
+}
+
+// FAT doesn't support this; raises ECAUSE_UNSUPPORTED.
+void fs_fat_mkfifo(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    (void)vfs;
+    (void)dir;
+    (void)name;
+    (void)name_len;
+    badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSUPPORTED);
+}
 
 
 // Convert a FAT dirent to a generic dirent.
@@ -1315,7 +1352,9 @@ static vfs_vtable_t fs_fat_vtable = {
     .create_dir   = fs_fat_create_dir,
     .unlink       = fs_fat_unlink,
     .rmdir        = fs_fat_unlink,
-    .exists       = fs_fat_exists,
+    .link         = fs_fat_link,
+    .symlink      = fs_fat_symlink,
+    .mkfifo       = fs_fat_mkfifo,
     .dir_read     = fs_fat_dir_read,
     .dir_find_ent = fs_fat_dir_find_ent,
     .stat         = fs_fat_stat,

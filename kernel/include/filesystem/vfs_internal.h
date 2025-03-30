@@ -51,6 +51,8 @@ void vfs_symlink(
     char const     *link_name,
     size_t          link_name_len
 );
+// Create a new named FIFO at a path relative to a dir handle.
+void vfs_mkfifo(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 
 // Duplicate a file or directory handle.
 vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig);
