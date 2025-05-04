@@ -38,7 +38,9 @@ fifo_t *fifo_create(size_t ent_size, size_t cap) {
     if (!fifo) {
         return NULL;
     }
-    fifo->buffer = calloc(ent_size, cap);
+    fifo->buffer   = calloc(ent_size, cap);
+    fifo->ent_size = ent_size;
+    fifo->cap      = cap;
     if (!fifo->buffer) {
         free(fifo);
         return NULL;

@@ -49,6 +49,8 @@ typedef uint32_t mountflags_t;
 // Kernel-only flag: Open for execution.
 #define KOFLAGS_EXECUTE 0x00010000
 
+// Bitmask of all flags valid for use with the `fs_pipe` function.
+#define VALID_OFLAGS_PIPE OFLAGS_NONBLOCK
 // Bitmask of all opening flags valid without the use of `OFLAGS_DIRECTORY` and without the use of `OFLAGS_EXCLUSIVE`.
 #define VALID_OFLAGS_FILE                                                                                              \
     (OFLAGS_READWRITE | OFLAGS_APPEND | OFLAGS_TRUNCATE | OFLAGS_CREATE | OFLAGS_EXCLUSIVE | OFLAGS_CLOEXEC |          \
@@ -67,7 +69,7 @@ typedef long inode_t;
 // Value used for absent file / directory handle.
 #define FILE_NONE ((file_t) - 1)
 // Type used for file / directory handles in the kernel.
-typedef int64_t file_t;
+typedef long    file_t;
 // Type used for file offsets.
 typedef int64_t fileoff_t;
 // Type used for file modes.
@@ -152,6 +154,12 @@ typedef struct stat {
     fileoff_t size;
 } stat_t;
 
+// Return value of `fs_pipe`.
+typedef struct {
+    file_t reader;
+    file_t writer;
+} fs_pipe_t;
+
 // Try to mount a filesystem.
 // Some filesystems (like RAMFS) do not use a block device, for which `media` must be NULL.
 // Filesystems which do use a block device can often be automatically detected.
@@ -168,26 +176,22 @@ char const *fs_detect(badge_err_t *ec, blkdev_t *media);
 // Test whether a path is a canonical path, but not for the existence of the file or directory.
 // A canonical path starts with '/' and contains none of the following regex: `\.\.?/|//+`
 bool fs_is_canonical_path(char const *path, size_t path_len);
-// TODO: stat functions:
-// // Get file status given path relative to a dir handle.
-// // If `at` is `FILE_NONE`, it is relative to the root dir.
-// bool fs_stat(badge_err_t *ec, stat_t *stat_out, file_t at, char const *path, size_t path_len);
-// // Get file status given path relative to a dir handle.
-// // If `at` is `FILE_NONE`, it is relative to the root dir.
-// // If the path ends in a symlink, show it's status instead of that of the target file.
-// bool fs_lstat(badge_err_t *ec, stat_t *stat_out, file_t at, char const *path, size_t path_len);
-// // Get file status given file handle.
-// bool fs_fstat(badge_err_t *ec, stat_t *stat_out, file_t file);
+
+// Get file status given file handler or path, optionally following the final symlink.
+// If both `fd` and `path` are specified, `fd` is a directory handle to which `path` is relative.
+// Otherwise, either `fd` or `path` is used to get the stat info.
+// If `follow_link` is false, the last symlink in the path is not followed.
+void fs_stat(badge_err_t *ec, file_t fd, char const *path, size_t path_len, bool follow_link, stat_t *stat_out);
 
 // Create a new directory relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
-void   fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len);
+void   fs_mkdir(badge_err_t *ec, file_t at, char const *path, size_t path_len);
 // Open a directory for reading relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
 file_t fs_dir_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, oflags_t oflags);
 // Remove a directory, which must be empty, relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
-void   fs_dir_remove(badge_err_t *ec, file_t at, char const *path, size_t path_len);
+void   fs_rmdir(badge_err_t *ec, file_t at, char const *path, size_t path_len);
 
 // Close a directory opened by `fs_dir_open`.
 // Only raises an error if `dir` is an invalid directory descriptor.
@@ -195,26 +199,23 @@ void          fs_dir_close(badge_err_t *ec, file_t dir);
 // Read all entries from a directory.
 dirent_list_t fs_dir_read(badge_err_t *ec, file_t dir);
 
-// Open a file for reading and/or writing relative to a dir handle.
-// If `at` is `FILE_NONE`, it is relative to the root dir.
-file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, oflags_t oflags);
 // Unlink a file from the given directory relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
 // If this is the last reference to an inode, the inode is deleted.
 // Fails if this is a directory.
-void   fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len);
+void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len);
 // Create a new hard link from one path to another relative to their respective dirs.
 // If `*_at` is `FILE_NONE`, it is relative to the root dir.
 // Fails if `old_path` names a directory.
-void   fs_link(
-      badge_err_t *ec,
-      file_t       old_at,
-      char const  *old_path,
-      size_t       old_path_len,
-      file_t       new_at,
-      char const  *new_path,
-      size_t       new_path_len
-  );
+void fs_link(
+    badge_err_t *ec,
+    file_t       old_at,
+    char const  *old_path,
+    size_t       old_path_len,
+    file_t       new_at,
+    char const  *new_path,
+    size_t       new_path_len
+);
 // Create a new symbolic link from one path to another, the latter relative to a dir handle.
 // The `old_path` specifies a path that is relative to the symlink's location.
 // If `new_at` is `FILE_NONE`, it is relative to the root dir.
@@ -230,6 +231,11 @@ void fs_symlink(
 // If `at` is `FILE_NONE`, it is relative to the root dir.
 void fs_mkfifo(badge_err_t *ec, file_t at, char const *path, size_t path_len);
 
+// Create a new pipe with one read and one write end.
+fs_pipe_t fs_pipe(badge_err_t *ec, int flags);
+// Open a file for reading and/or writing relative to a dir handle.
+// If `at` is `FILE_NONE`, it is relative to the root dir.
+file_t    fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, oflags_t oflags);
 // Close a file opened by `fs_open`.
 // Only raises an error if `file` is an invalid file descriptor or an I/O error occurs.
 void      fs_close(badge_err_t *ec, file_t file);

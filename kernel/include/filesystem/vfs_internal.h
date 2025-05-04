@@ -7,15 +7,22 @@
 #include "filesystem/vfs_types.h"
 #include "mutex.h"
 
+// Return value of `vfs_pipe_t`.
+// This isn't the same single file object to future-proof for bidirectional unnamed pipes.
+typedef struct {
+    vfs_file_obj_t *reader;
+    vfs_file_obj_t *writer;
+} vfs_pipe_t;
+
 
 
 // Open the root directory of the filesystem.
 vfs_file_obj_t *vfs_root_open(badge_err_t *ec, vfs_t *vfs);
 
 // Create a new empty file.
-vfs_file_obj_t *vfs_file_create(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
+vfs_file_obj_t *vfs_mkfile(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Insert a new directory into the given directory.
-void            vfs_dir_create(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
+void            vfs_mkdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Unlink a file from the given directory.
 // If this is the last reference to an inode, the inode is deleted.
 void            vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
@@ -31,17 +38,15 @@ bool          vfs_dir_find_ent(badge_err_t *ec, vfs_file_obj_t *dir, dirent_t *e
 // Stat a file object.
 void vfs_stat(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat);
 
-// Open a file or directory for reading and/or writing given parent directory handle.
-vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Unlink a file from the given directory relative to a dir handle.
 // If this is the last reference to an inode, the inode is deleted.
 // Fails if this is a directory.
-void            vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
+void vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Create a new hard link from one path to another relative to their respective dirs.
 // Fails if `old_path` names a directory.
-void            vfs_link(
-               badge_err_t *ec, vfs_file_obj_t *old_obj, vfs_file_obj_t *new_dir, char const *new_name, size_t new_name_len
-           );
+void vfs_link(
+    badge_err_t *ec, vfs_file_obj_t *old_obj, vfs_file_obj_t *new_dir, char const *new_name, size_t new_name_len
+);
 // Create a new symbolic link from one path to another, the latter relative to a dir handle.
 void vfs_symlink(
     badge_err_t    *ec,
@@ -54,6 +59,10 @@ void vfs_symlink(
 // Create a new named FIFO at a path relative to a dir handle.
 void vfs_mkfifo(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 
+// Create a new pipe with one read and one write end.
+vfs_pipe_t      vfs_pipe(badge_err_t *ec, int flags);
+// Open a file or directory for reading and/or writing given parent directory handle.
+vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len);
 // Duplicate a file or directory handle.
 vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig);
 // Close a file opened by `vfs_file_open`.

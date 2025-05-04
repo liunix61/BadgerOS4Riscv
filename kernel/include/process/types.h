@@ -53,8 +53,8 @@ typedef struct proc_memmap_t {
 
 // Process file descriptor.
 typedef struct {
-    file_t virt;
-    file_t real;
+    long   u_fd;
+    file_t k_fd;
 } proc_fd_t;
 
 // Pending signal entry.

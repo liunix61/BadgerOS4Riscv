@@ -92,30 +92,65 @@ SYSCALL_DEF(15, SYSCALL_PROC_WAITPID, syscall_proc_waitpid, int, int pid, int *w
 // Implemented in filesystem/syscall_impl.c
 
 // Open a file, optionally relative to a directory.
+// If `at` is -1, `path` is relative to the working directory.
 // Returns <= -1 on error, file descriptor number on success.
-SYSCALL_DEF(16, SYSCALL_FS_OPEN, syscall_fs_open, file_t, file_t dirfd, char const *path, size_t path_len, int oflags)
+SYSCALL_DEF(16, SYSCALL_FS_OPEN, syscall_fs_open, long, long at, char const *path, size_t path_len, int oflags)
 
 // Flush and close a file.
-SYSCALL_DEF(17, SYSCALL_FS_CLOSE, syscall_fs_close, bool, file_t fd)
+SYSCALL_DEF(17, SYSCALL_FS_CLOSE, syscall_fs_close, int, long fd)
 
 // Read bytes from a file.
 // Returns -1 on EOF, <= -2 on error, read count on success.
-SYSCALL_DEF(18, SYSCALL_FS_READ, syscall_fs_read, long, file_t fd, void *read_buf, long read_len)
+SYSCALL_DEF(18, SYSCALL_FS_READ, syscall_fs_read, long, long fd, void *read_buf, long read_len)
 
 // Write bytes to a file.
 // Returns <= -1 on error, write count on success.
-SYSCALL_DEF(19, SYSCALL_FS_WRITE, syscall_fs_write, long, file_t fd, void const *write_buf, long write_len)
+SYSCALL_DEF(19, SYSCALL_FS_WRITE, syscall_fs_write, long, long fd, void const *write_buf, long write_len)
 
 // Read directory entries from a directory handle.
 // See `dirent_t` for the format.
 // Returns <= -1 on error, read count on success.
-SYSCALL_DEF(20, SYSCALL_FS_GETDENTS, syscall_fs_getdents, long, file_t fd, void *read_buf, long read_len)
+SYSCALL_DEF(20, SYSCALL_FS_GETDENTS, syscall_fs_getdents, long, long fd, void *read_buf, long read_len)
 
 // // Rename and/or move a file to another path, optionally relative to one or two directories.
 // SYSCALL_DEF_V(21, SYSCALL_FS_RENAME, syscall_fs_rename)
 
-// // Get file status given file handler or path, optionally following the final symlink.
-// SYSCALL_DEF_V(22, SYSCALL_FS_STAT, syscall_fs_stat)
+// Get file status given file handler or path, optionally following the final symlink.
+// If `path` is specified, it is interpreted as relative to the working directory.
+// If both `path` and `fd` are specified, `path` is relative to the directory that `fd` describes.
+// If only `fd` is specified, the inode referenced by `fd` is stat'ed.
+// If `follow_link` is false, the last symlink in the path is not followed.
+SYSCALL_DEF(22, SYSCALL_FS_STAT, syscall_fs_stat, int, long fd, char const *path, size_t path_len, bool follow_link, stat_t *stat_out)
+
+// Create a new directory.
+// If `at` is -1, `path` is relative to the working directory.
+// Returns <= -1 on error, file 0 on success.
+SYSCALL_DEF(47, SYSCALL_FS_MKDIR, syscall_fs_mkdir, int, long at, char const *path, size_t path_len)
+
+// Delete a directory if it is empty.
+// If `at` is -1, `path` is relative to the working directory.
+// Returns <= -1 on error, file 0 on success.
+SYSCALL_DEF(48, SYSCALL_FS_RMDIR, syscall_fs_rmdir, int, long at, char const *path, size_t path_len)
+
+// Create a new link to an existing inode.
+// If `*_at` is -1, the respective `*_path` is relative to the working directory.
+// Returns <= -1 on error, file 0 on success.
+SYSCALL_DEF(49, SYSCALL_FS_LINK, syscall_fs_link, int, long old_at, char const *old_path, size_t old_path_len, long new_at, char const *new_path, size_t new_path_len)
+
+// Remove a link to an inode. If it is the last link, the file is deleted.
+// If `at` is -1, `path` is relative to the working directory.
+// Returns <= -1 on error, file 0 on success.
+SYSCALL_DEF(50, SYSCALL_FS_UNLINK, syscall_fs_unlink, int, long at, char const *path, size_t path_len)
+
+// Create a new FIFO / named pipe.
+// If `at` is -1, `path` is relative to the working directory.
+// Returns <= -1 on error, file 0 on success.
+SYSCALL_DEF(51, SYSCALL_FS_MKFIFO, syscall_fs_mkfifo, int, long at, char const *path, size_t path_len)
+
+// Create a new pipe.
+// `fds[0]` will be written with the pointer to the read end, `fds[1]` the write end.
+// Returns <= -1 on error, file 0 on success.
+SYSCALL_DEF(52, SYSCALL_FS_PIPE, syscall_fs_pipe, int, long fds[2], int flags)
 
 
 

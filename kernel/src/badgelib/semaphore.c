@@ -72,7 +72,9 @@ static void sem_block(sem_t *sem, timestamp_us_t timeout) {
     if (atomic_load_explicit(&sem->available, memory_order_relaxed)) {
         thread_unblock(ent.tid, ent.ticket);
         while (atomic_flag_test_and_set_explicit(&sem->wait_spinlock, memory_order_acquire));
-        dlist_remove(&sem->waiting_list, &ent.node);
+        if (ent.node.next) {
+            dlist_remove(&sem->waiting_list, &ent.node);
+        }
         atomic_flag_clear_explicit(&sem->wait_spinlock, memory_order_release);
     } else {
         thread_yield();

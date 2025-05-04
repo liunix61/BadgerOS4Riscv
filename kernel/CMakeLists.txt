@@ -33,6 +33,7 @@ set(common_compiler_flags
     -Werror=implicit-fallthrough
     -Werror=int-conversion
     -Werror=incompatible-pointer-types
+    -Werror=implicit-function-declaration
     -Wall -Wextra                      # Ramp up warning level.
     -Wno-missing-braces
     -std=gnu11                         # We use the C11 standard

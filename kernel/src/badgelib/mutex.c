@@ -70,7 +70,9 @@ static void mutex_block(mutex_t *mutex, timestamp_us_t timeout, int double_check
         // If the value changed, unblock early to prevent race conditions.
         thread_unblock(ent.tid, ent.ticket);
         while (atomic_flag_test_and_set_explicit(&mutex->wait_spinlock, memory_order_acquire));
-        dlist_remove(&mutex->waiting_list, &ent.node);
+        if (ent.node.next) {
+            dlist_remove(&mutex->waiting_list, &ent.node);
+        }
         atomic_flag_clear_explicit(&mutex->wait_spinlock, memory_order_release);
     } else {
         thread_yield();

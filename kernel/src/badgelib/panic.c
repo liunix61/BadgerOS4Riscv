@@ -15,7 +15,7 @@ void abort() {
     panic_abort();
 }
 
-void cpu_panic_poweroff();
+NORETURN void cpu_panic_poweroff();
 
 static void kekw() {
     // clang-format off

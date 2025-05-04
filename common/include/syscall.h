@@ -33,8 +33,8 @@ typedef struct {
 syscall_info_t syscall_info(int no);
 
 #else
-typedef int file_t;
-typedef int tid_t;
+typedef int         tid_t;
+typedef struct stat stat_t;
 
 // Process is running or waiting for syscalls.
 #define PROC_RUNNING     0x00000001
@@ -61,6 +61,8 @@ typedef int tid_t;
 #define OFLAGS_CLOEXEC   0x00000040
 // Open a directory instead of a file.
 #define OFLAGS_DIRECTORY 0x00000080
+// Do not block on sockets, FIFOs, TTYs, etc.
+#define OFLAGS_NONBLOCK  0x00000100
 
 #define MEMFLAGS_R   0x00000001
 #define MEMFLAGS_W   0x00000002

@@ -152,7 +152,7 @@ static vfs_file_desc_t *get_fd_ptr(badge_err_t *ec, file_t fileno) {
         fd = files[res.index];
         fd_take_ref(fd);
     } else {
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_BAD_FD);
     }
     mutex_release_shared(NULL, &files_mtx);
     return fd;
@@ -274,7 +274,6 @@ void fs_mount(
     } else {
         vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
         if (!at_fd) {
-            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
             return;
         }
         at_obj = vfs_file_dup(at_fd->obj);
@@ -345,9 +344,65 @@ bool fs_is_canonical_path(char const *path, size_t path_len);
 
 
 
+// Get file status given file handler or path, optionally following the final symlink.
+// If both `fd` and `path` are specified, `fd` is a directory handle to which `path` is relative.
+// Otherwise, either `fd` or `path` is used to get the stat info.
+// If `follow_link` is false, the last symlink in the path is not followed.
+void fs_stat(badge_err_t *ec, file_t fd, char const *path, size_t path_len, bool follow_link, stat_t *stat_out) {
+    vfs_file_obj_t *to_stat;
+
+    // Get the file object to stat.
+    if (path) {
+        // Get handle for relative directory.
+        vfs_file_obj_t *at_obj;
+        if (fd == FILE_NONE) {
+            at_obj = vfs_file_dup(root_fs.root_dir_obj);
+        } else {
+            vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, fd);
+            if (!at_fd) {
+                return;
+            }
+            at_obj = vfs_file_dup(at_fd->obj);
+            fd_drop_ref(ec, at_fd);
+        }
+
+        mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+
+        // Walk the filesystem.
+        walk_t res = walk(ec, at_obj, path, path_len, false);
+        vfs_file_drop_ref(ec, at_obj);
+
+        if (!res.file) {
+            if (badge_err_is_ok(ec)) {
+                badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
+            }
+        }
+        to_stat = res.file;
+
+        mutex_release(NULL, &dirs_mtx);
+
+    } else if (fd != FILE_NONE) {
+        // Get the file/dir to stat directly from `fd`.
+        vfs_file_desc_t *fd_ptr = get_fd_ptr(ec, fd);
+        if (!fd_ptr) {
+            return;
+        }
+        to_stat = vfs_file_dup(fd_ptr->obj);
+        fd_drop_ref(NULL, fd_ptr);
+
+    } else {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+    }
+
+    vfs_stat(ec, to_stat, stat_out);
+    vfs_file_drop_ref(NULL, to_stat);
+}
+
+
+
 // Create a new directory relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
-void fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
+void fs_mkdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
     badge_err_t ec0 = {0};
     ec              = ec ?: &ec0;
 
@@ -364,7 +419,6 @@ void fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len
     } else {
         vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
         if (!at_fd) {
-            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
             return;
         }
         at_obj = vfs_file_dup(at_fd->obj);
@@ -391,7 +445,7 @@ void fs_dir_create(badge_err_t *ec, file_t at, char const *path, size_t path_len
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
         vfs_file_drop_ref(ec, res.file);
     } else if (res.parent) {
-        vfs_dir_create(ec, res.parent, res.filename, res.filename_len);
+        vfs_mkdir(ec, res.parent, res.filename, res.filename_len);
     }
     if (res.parent) {
         vfs_file_drop_ref(badge_err_is_ok(ec) ? ec : NULL, res.parent);
@@ -409,7 +463,47 @@ file_t fs_dir_open(badge_err_t *ec, file_t at, char const *path, size_t path_len
 
 // Remove a directory, which must be empty, relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
-void fs_dir_remove(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
+void fs_rmdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
+    if (!root_mounted) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
+        logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
+        return;
+    }
+
+    // Get handle for relative directory.
+    vfs_file_obj_t *at_obj;
+    if (at == FILE_NONE) {
+        at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
+        if (!at_fd) {
+            return;
+        }
+        at_obj = vfs_file_dup(at_fd->obj);
+        fd_drop_ref(ec, at_fd);
+    }
+
+    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+
+    // Walk the filesystem.
+    walk_t res = walk(ec, at_obj, path, path_len, false);
+    vfs_file_drop_ref(ec, at_obj);
+
+    if (res.file) {
+        vfs_rmdir(ec, res.parent, res.filename, res.filename_len);
+    } else {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
+    }
+
+    mutex_release(NULL, &dirs_mtx);
+
+    // Clean up.
+    if (res.file) {
+        vfs_file_drop_ref(ec, res.file);
+    }
+    if (res.parent) {
+        vfs_file_drop_ref(ec, res.parent);
+    }
 }
 
 
@@ -434,133 +528,6 @@ dirent_list_t fs_dir_read(badge_err_t *ec, file_t dir) {
 
 
 
-// Open a file for reading and/or writing relative to a dir handle.
-// If `at` is `FILE_NONE`, it is relative to the root dir.
-file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, oflags_t oflags) {
-    badge_err_t ec0 = {0};
-    ec              = ec ?: &ec0;
-
-    if (!root_mounted) {
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
-        logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
-        return FILE_NONE;
-    }
-
-    if ((oflags & OFLAGS_DIRECTORY) && (oflags & ~VALID_OFLAGS_DIRECTORY)) {
-        // Invalid flags for opening dir.
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
-        return FILE_NONE;
-    }
-    if (!(oflags & OFLAGS_DIRECTORY) && (oflags & ~VALID_OFLAGS_FILE)) {
-        // Invalid flags for opening file.
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
-        return FILE_NONE;
-    }
-    if (!(oflags & OFLAGS_READWRITE)) {
-        // Neither read nor write requested.
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
-        return FILE_NONE;
-    }
-    if ((oflags & OFLAGS_EXCLUSIVE) && !(oflags & OFLAGS_CREATE)) {
-        // O_EXCL requires O_CREAT.
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
-        return FILE_NONE;
-    }
-
-    // Get handle for relative directory.
-    vfs_file_obj_t *at_obj;
-    if (at == FILE_NONE) {
-        at_obj = vfs_file_dup(root_fs.root_dir_obj);
-    } else {
-        vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
-        if (!at_fd) {
-            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
-            return FILE_NONE;
-        }
-        at_obj = vfs_file_dup(at_fd->obj);
-        // TODO: finish adding error handling here.
-        fd_drop_ref(ec, at_fd);
-        if (!badge_err_is_ok(ec)) {
-            vfs_file_drop_ref(NULL, at_obj);
-            return FILE_NONE;
-        }
-    }
-
-    // Lock dir modifications.
-    if (oflags & OFLAGS_CREATE) {
-        mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
-    } else {
-        mutex_acquire_shared(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
-    }
-
-    // Walk the filesystem.
-    walk_t res = walk(ec, at_obj, path, path_len, false);
-    vfs_file_drop_ref(ec, at_obj);
-    if (!res.file && res.parent && (oflags & OFLAGS_CREATE)) {
-        // Create file if OFLAGS_CREATE is set.
-        res.file = vfs_file_create(ec, res.parent, res.filename, res.filename_len);
-    }
-
-    if (res.file) {
-        atomic_fetch_add(&res.file->vfs->n_open_fd, 1);
-    }
-
-    // Unlock dir modifications.
-    if (oflags & OFLAGS_CREATE) {
-        mutex_release(NULL, &dirs_mtx);
-    } else {
-        mutex_release_shared(NULL, &dirs_mtx);
-    }
-
-    if (res.parent) {
-        vfs_file_drop_ref(ec, res.parent);
-    }
-
-    if (!res.file) {
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
-        return FILE_NONE;
-    }
-
-    if (res.file->type == FILETYPE_FIFO) {
-        // Open the FIFO before finishing the handle creation.
-        vfs_fifo_open(
-            ec,
-            res.file->fifo,
-            oflags & OFLAGS_NONBLOCK,
-            oflags & OFLAGS_READONLY,
-            oflags & OFLAGS_WRITEONLY
-        );
-        if (!badge_err_is_ok(ec)) {
-            vfs_file_drop_ref(NULL, res.file);
-            return FILE_NONE;
-        }
-    }
-
-    // Create new file handle.
-    vfs_file_desc_t *fd = calloc(1, sizeof(vfs_file_desc_t));
-    fd->obj             = res.file;
-    fd->read            = oflags & OFLAGS_READONLY;
-    fd->write           = oflags & OFLAGS_WRITEONLY;
-    fd->append          = oflags & OFLAGS_APPEND;
-    fd->nonblock        = oflags & OFLAGS_NONBLOCK;
-    atomic_store_explicit(&fd->refcount, 1, memory_order_release);
-
-    mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
-
-    // Insert handle into files array.
-    if (!array_lencap_sorted_insert(&files, sizeof(void *), &files_len, &files_cap, &fd, vfs_file_desc_id_cmp)) {
-        mutex_release(NULL, &files_mtx);
-        vfs_file_drop_ref(NULL, fd->obj);
-        free(fd);
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
-        return FILE_NONE;
-    }
-    fd->fileno = fileno_ctr++;
-
-    mutex_release(NULL, &files_mtx);
-    return fd->fileno;
-}
-
 // Unlink a file from the given directory relative to a dir handle.
 // If `at` is `FILE_NONE`, it is relative to the root dir.
 // If this is the last reference to an inode, the inode is deleted.
@@ -579,7 +546,6 @@ void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
     } else {
         vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
         if (!at_fd) {
-            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
             return;
         }
         at_obj = vfs_file_dup(at_fd->obj);
@@ -713,7 +679,6 @@ void fs_symlink(
     } else {
         vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, link_at);
         if (!at_fd) {
-            badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
             return;
         }
         link_at_obj = vfs_file_dup(at_fd->obj);
@@ -744,7 +709,260 @@ void fs_symlink(
     }
 }
 
+// Create a new named FIFO at a path relative to a dir handle.
+// If `at` is `FILE_NONE`, it is relative to the root dir.
+void fs_mkfifo(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
 
+    if (!root_mounted) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
+        logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
+        return;
+    }
+
+    // Get handle for relative directory.
+    vfs_file_obj_t *at_obj;
+    if (at == FILE_NONE) {
+        at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
+        if (!at_fd) {
+            return;
+        }
+        at_obj = vfs_file_dup(at_fd->obj);
+        fd_drop_ref(ec, at_fd);
+        if (!badge_err_is_ok(ec)) {
+            return;
+        }
+    }
+
+    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    walk_t res = walk(ec, at_obj, path, path_len, true);
+    vfs_file_drop_ref(ec, at_obj);
+    if (!badge_err_is_ok(ec)) {
+        if (res.file) {
+            vfs_file_drop_ref(NULL, res.file);
+        }
+        if (res.parent) {
+            vfs_file_drop_ref(NULL, res.parent);
+        }
+        mutex_release(NULL, &dirs_mtx);
+        return;
+    }
+    if (res.file) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
+        vfs_file_drop_ref(ec, res.file);
+    } else if (res.parent) {
+        vfs_mkfifo(ec, res.parent, res.filename, res.filename_len);
+    }
+    if (res.parent) {
+        vfs_file_drop_ref(badge_err_is_ok(ec) ? ec : NULL, res.parent);
+    } else {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
+    }
+    mutex_release(NULL, &dirs_mtx);
+}
+
+
+
+// Create a new pipe with one read and one write end.
+fs_pipe_t fs_pipe(badge_err_t *ec, int flags) {
+    if (flags & ~VALID_OFLAGS_PIPE) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+        return (fs_pipe_t){-1, -1};
+    }
+
+    // Allocate file descriptors.
+    vfs_file_desc_t *reader = calloc(1, sizeof(vfs_file_obj_t));
+    if (!reader) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return (fs_pipe_t){-1, -1};
+    }
+    vfs_file_desc_t *writer = calloc(1, sizeof(vfs_file_obj_t));
+    if (!writer) {
+        free(reader);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return (fs_pipe_t){-1, -1};
+    }
+
+    // Create the actual pipe handles.
+    vfs_pipe_t vfs_pipes = vfs_pipe(ec, flags);
+    if (!vfs_pipes.reader || !vfs_pipes.writer) {
+        assert_dev_drop(!vfs_pipes.reader && !vfs_pipes.writer);
+        free(reader);
+        free(writer);
+        return (fs_pipe_t){-1, -1};
+    }
+
+    // Fill in the file descriptor details.
+    reader->read     = true;
+    reader->refcount = 1;
+    reader->obj      = vfs_pipes.reader;
+    writer->write    = true;
+    writer->refcount = 1;
+    writer->obj      = vfs_pipes.writer;
+
+
+    mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
+
+    // Insert both into the files array.
+    if (!array_lencap_insert(&files, sizeof(void *), &files_len, &files_cap, &reader, files_len)) {
+        mutex_release(NULL, &files_mtx);
+        vfs_file_drop_ref(NULL, reader->obj);
+        vfs_file_drop_ref(NULL, writer->obj);
+        free(reader);
+        free(writer);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return (fs_pipe_t){-1, -1};
+    }
+    reader->fileno = fileno_ctr++;
+
+    if (!array_lencap_insert(&files, sizeof(void *), &files_len, &files_cap, &writer, files_len)) {
+        files_len--;
+        mutex_release(NULL, &files_mtx);
+        vfs_file_drop_ref(NULL, reader->obj);
+        vfs_file_drop_ref(NULL, writer->obj);
+        free(reader);
+        free(writer);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return (fs_pipe_t){-1, -1};
+    }
+    writer->fileno = fileno_ctr++;
+
+    mutex_release(NULL, &files_mtx);
+
+    return (fs_pipe_t){
+        .reader = reader->fileno,
+        .writer = writer->fileno,
+    };
+}
+
+// Open a file for reading and/or writing relative to a dir handle.
+// If `at` is `FILE_NONE`, it is relative to the root dir.
+file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, oflags_t oflags) {
+    badge_err_t ec0 = {0};
+    ec              = ec ?: &ec0;
+
+    if (!root_mounted) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNAVAIL);
+        logk(LOG_ERROR, "Filesystem op run without a filesystem mounted");
+        return FILE_NONE;
+    }
+
+    if ((oflags & OFLAGS_DIRECTORY) && (oflags & ~VALID_OFLAGS_DIRECTORY)) {
+        // Invalid flags for opening dir.
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+        return FILE_NONE;
+    }
+    if (!(oflags & OFLAGS_DIRECTORY) && (oflags & ~VALID_OFLAGS_FILE)) {
+        // Invalid flags for opening file.
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+        return FILE_NONE;
+    }
+    if (!(oflags & OFLAGS_READWRITE)) {
+        // Neither read nor write requested.
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+        return FILE_NONE;
+    }
+    if ((oflags & OFLAGS_EXCLUSIVE) && !(oflags & OFLAGS_CREATE)) {
+        // O_EXCL requires O_CREAT.
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
+        return FILE_NONE;
+    }
+
+    // Get handle for relative directory.
+    vfs_file_obj_t *at_obj;
+    if (at == FILE_NONE) {
+        at_obj = vfs_file_dup(root_fs.root_dir_obj);
+    } else {
+        vfs_file_desc_t *at_fd = get_dir_fd_ptr(ec, at);
+        if (!at_fd) {
+            return FILE_NONE;
+        }
+        at_obj = vfs_file_dup(at_fd->obj);
+        // TODO: finish adding error handling here.
+        fd_drop_ref(ec, at_fd);
+        if (!badge_err_is_ok(ec)) {
+            vfs_file_drop_ref(NULL, at_obj);
+            return FILE_NONE;
+        }
+    }
+
+    // Lock dir modifications.
+    if (oflags & OFLAGS_CREATE) {
+        mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    } else {
+        mutex_acquire_shared(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    }
+
+    // Walk the filesystem.
+    walk_t res = walk(ec, at_obj, path, path_len, false);
+    vfs_file_drop_ref(ec, at_obj);
+    if (!res.file && res.parent && (oflags & OFLAGS_CREATE)) {
+        // Create file if OFLAGS_CREATE is set.
+        res.file = vfs_mkfile(ec, res.parent, res.filename, res.filename_len);
+    }
+
+    if (res.file) {
+        atomic_fetch_add(&res.file->vfs->n_open_fd, 1);
+    }
+
+    // Unlock dir modifications.
+    if (oflags & OFLAGS_CREATE) {
+        mutex_release(NULL, &dirs_mtx);
+    } else {
+        mutex_release_shared(NULL, &dirs_mtx);
+    }
+
+    if (res.parent) {
+        vfs_file_drop_ref(ec, res.parent);
+    }
+
+    if (!res.file) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
+        return FILE_NONE;
+    }
+
+    if (res.file->type == FILETYPE_FIFO) {
+        // Open the FIFO before finishing the handle creation.
+        vfs_fifo_open(
+            ec,
+            res.file->fifo,
+            oflags & OFLAGS_NONBLOCK,
+            oflags & OFLAGS_READONLY,
+            oflags & OFLAGS_WRITEONLY
+        );
+        if (!badge_err_is_ok(ec)) {
+            vfs_file_drop_ref(NULL, res.file);
+            return FILE_NONE;
+        }
+    }
+
+    // Create new file handle.
+    vfs_file_desc_t *fd = calloc(1, sizeof(vfs_file_desc_t));
+    fd->obj             = res.file;
+    fd->read            = oflags & OFLAGS_READONLY;
+    fd->write           = oflags & OFLAGS_WRITEONLY;
+    fd->append          = oflags & OFLAGS_APPEND;
+    fd->nonblock        = oflags & OFLAGS_NONBLOCK;
+    fd->refcount        = 1;
+
+    mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
+
+    // Insert handle into files array.
+    if (!array_lencap_insert(&files, sizeof(void *), &files_len, &files_cap, &fd, files_len)) {
+        mutex_release(NULL, &files_mtx);
+        vfs_file_drop_ref(NULL, fd->obj);
+        free(fd);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return FILE_NONE;
+    }
+    fd->fileno = fileno_ctr++;
+
+    mutex_release(NULL, &files_mtx);
+    return fd->fileno;
+}
 
 // Close a file opened by `fs_open`.
 // Only raises an error if `file` is an invalid file descriptor.

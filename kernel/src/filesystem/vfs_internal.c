@@ -4,6 +4,7 @@
 #include "filesystem/vfs_internal.h"
 
 #include "arrays.h"
+#include "assertions.h"
 #include "filesystem/vfs_fifo.h"
 #include "malloc.h"
 
@@ -123,7 +124,11 @@ vfs_file_obj_t *vfs_root_open(badge_err_t *ec, vfs_t *vfs) {
 
 
 // Create a new empty file.
-vfs_file_obj_t *vfs_file_create(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+vfs_file_obj_t *vfs_mkfile(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return NULL;
+    }
     badge_err_t ec0 = {0};
     ec              = ec ?: &ec0;
     dir->vfs->vtable.create_file(ec, dir->vfs, dir, name, name_len);
@@ -134,15 +139,19 @@ vfs_file_obj_t *vfs_file_create(badge_err_t *ec, vfs_file_obj_t *dir, char const
 }
 
 // Insert a new directory into the given directory.
-void vfs_dir_create(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+void vfs_mkdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return;
+    }
     dir->vfs->vtable.create_dir(ec, dir->vfs, dir, name, name_len);
 }
 
 // Unlink a file from the given directory.
 // If this is the last reference to an inode, the inode is deleted.
 void vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
-    if (dir->is_vfs_root) {
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_DIR);
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
         return;
     }
 
@@ -160,10 +169,57 @@ void vfs_unlink(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t n
     dir->vfs->vtable.unlink(ec, dir->vfs, dir, name, name_len, open_existing(dir->vfs, ent.inode));
 }
 
+// Create a new hard link from one path to another relative to their respective dirs.
+// Fails if `old_path` names a directory.
+void vfs_link(
+    badge_err_t *ec, vfs_file_obj_t *old_obj, vfs_file_obj_t *new_dir, char const *new_name, size_t new_name_len
+) {
+    // No need to check for pipes at `old_obj` because BadgerOS doesn't allow linking nameless files.
+    if (new_dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return;
+    }
+
+    if (old_obj->type == FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_DIR);
+        return;
+    } else if (old_obj->vfs != new_dir->vfs) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_CROSSDEV);
+        return;
+    }
+
+    old_obj->vfs->vtable.link(ec, old_obj->vfs, old_obj, new_dir, new_name, new_name_len);
+}
+
+// Create a new symbolic link from one path to another, the latter relative to a dir handle.
+void vfs_symlink(
+    badge_err_t    *ec,
+    char const     *target_path,
+    size_t          target_path_len,
+    vfs_file_obj_t *link_dir,
+    char const     *link_name,
+    size_t          link_name_len
+) {
+    if (link_dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return;
+    }
+    link_dir->vfs->vtable.symlink(ec, link_dir->vfs, target_path, target_path_len, link_dir, link_name, link_name_len);
+}
+
+// Create a new named FIFO at a path relative to a dir handle.
+void vfs_mkfifo(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return;
+    }
+    dir->vfs->vtable.mkfifo(ec, dir->vfs, dir, name, name_len);
+}
+
 // Remove a directory if it is empty.
 void vfs_rmdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
-    if (dir->is_vfs_root) {
-        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_INUSE);
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
         return;
     }
 
@@ -178,24 +234,76 @@ void vfs_rmdir(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t na
         return;
     }
 
-    dir->vfs->vtable.rmdir(ec, dir->vfs, dir, name, name_len, open_existing(dir->vfs, ent.inode));
+    // Assert that no filesystem is mounted here.
+    vfs_file_obj_t *existing = open_existing(dir->vfs, ent.inode);
+    if (dir->is_vfs_root) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_INUSE);
+        vfs_file_drop_ref(NULL, existing);
+        return;
+    }
+
+    dir->vfs->vtable.rmdir(ec, dir->vfs, dir, name, name_len, existing);
 }
 
 
 // Read all entries from a directory.
 dirent_list_t vfs_dir_read(badge_err_t *ec, vfs_file_obj_t *dir) {
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return (dirent_list_t){0};
+    }
     return dir->vfs->vtable.dir_read(ec, dir->vfs, dir);
 }
 
 // Read the directory entry with the matching name.
 // Returns true if the entry was found.
 bool vfs_dir_find_ent(badge_err_t *ec, vfs_file_obj_t *dir, dirent_t *ent, char const *name, size_t name_len) {
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return false;
+    }
     return dir->vfs->vtable.dir_find_ent(ec, dir->vfs, dir, ent, name, name_len);
 }
 
 
+// Stat a file object.
+void vfs_stat(badge_err_t *ec, vfs_file_obj_t *file, stat_t *stat_out) {
+    if (!file->vfs) {
+        // Special case: Stat on an unnamed pipe.
+        mem_set(stat_out, 0, sizeof(stat_t));
+        return;
+    }
+    file->vfs->vtable.stat(ec, file->vfs, file, stat_out);
+}
+
+
+// Create a new pipe with one read and one write end.
+vfs_pipe_t vfs_pipe(badge_err_t *ec, int flags) {
+    vfs_file_obj_t *fobj = calloc(1, sizeof(vfs_file_obj_t));
+    if (!fobj) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return (vfs_pipe_t){0};
+    }
+    fobj->refcount = 2;
+    fobj->type     = FILETYPE_FIFO;
+    fobj->fifo     = vfs_fifo_create();
+    if (!fobj->fifo) {
+        free(fobj);
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+        return (vfs_pipe_t){0};
+    }
+    vfs_fifo_open(NULL, fobj->fifo, true, true, true);
+    badge_err_set_ok(ec);
+
+    return (vfs_pipe_t){fobj, fobj};
+}
+
 // Open a file or directory for reading and/or writing given parent directory handle.
 vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *name, size_t name_len) {
+    if (dir->type != FILETYPE_DIR) {
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_IS_FILE);
+        return NULL;
+    }
     badge_err_t ec0 = {0};
     ec              = ec ?: &ec0;
 
@@ -256,6 +364,17 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
         fobj->fifo = vfs_fifo_create();
     }
 
+    // Insert into file objects list.
+    if (!array_lencap_sorted_insert(&objs, sizeof(void *), &objs_len, &objs_cap, &fobj, vfs_file_obj_cmp)) {
+        dir->vfs->vtable.file_close(NULL, dir->vfs, fobj);
+        free(fobj->cookie);
+        free(fobj);
+        fobj = NULL;
+        badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
+    } else {
+        badge_err_set_ok(ec);
+    }
+
     mutex_release(NULL, &objs_mtx);
 
     return fobj;
@@ -280,6 +399,23 @@ vfs_file_obj_t *vfs_file_dup(vfs_file_obj_t *orig) {
 // Only raises an error if `file` is an invalid file descriptor.
 void vfs_file_drop_ref(badge_err_t *ec, vfs_file_obj_t *file) {
     if (atomic_fetch_sub(&file->refcount, 1) == 1) {
+        // Remove from file objects list.
+        array_binsearch_t res = array_binsearch(objs, sizeof(void *), objs_len, &file, vfs_file_obj_cmp);
+        if (res.found) {
+            array_lencap_remove(&objs, sizeof(void *), &objs_len, &objs_cap, NULL, res.index);
+        } else {
+            assert_dev_drop(file->vfs == NULL);
+        }
+
+        if (file->type == FILETYPE_FIFO) {
+            // Closing a FIFO or pipe.
+            vfs_fifo_destroy(file->fifo);
+        }
+        if (!file->vfs) {
+            // Special case: An unnamed pipe does not have a filesystem; skip closing there.
+            badge_err_set_ok(ec);
+            return;
+        }
         file->vfs->vtable.file_close(ec, file->vfs, file);
         free(file->cookie);
     } else {

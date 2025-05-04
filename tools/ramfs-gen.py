@@ -55,7 +55,7 @@ def add_dir(path, virtpath):
     global dirs, file_count
     for filename in os.listdir(path):
         if os.path.isdir(path + "/" + filename):
-            dirs += "    fs_dir_create(&ec, FILE_NONE, \"{}\", {});\n".format(escape(virtpath + "/" + filename), len(virtpath) + 1 + len(filename))
+            dirs += "    fs_mkdir(&ec, FILE_NONE, \"{}\", {});\n".format(escape(virtpath + "/" + filename), len(virtpath) + 1 + len(filename))
             dirs += "    badge_err_assert_dev(&ec);\n"
             add_dir(path + "/" + filename, virtpath + "/" + filename)
         else:

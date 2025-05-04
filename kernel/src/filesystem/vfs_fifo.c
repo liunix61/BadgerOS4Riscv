@@ -207,7 +207,7 @@ fileoff_t vfs_fifo_write(
     }
 
     if (!nonblock) {
-        vfs_fifo_block(fifo, true, false);
+        vfs_fifo_block(fifo, false, false);
     } else {
         irq_disable();
         spinlock_take_shared(&fifo->buffer_lock);

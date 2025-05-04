@@ -383,17 +383,32 @@ void proc_delete_thread_raw_unsafe(badge_err_t *ec, process_t *process, sched_th
     __builtin_trap();
 }
 
+// Compares two `proc_fd_t` by user FD.
+static int proc_fd_cmp_u(void const *a_ptr, void const *b_ptr) {
+    proc_fd_t const *a = a_ptr;
+    proc_fd_t const *b = b_ptr;
+    if (a->u_fd < b->u_fd) {
+        return -1;
+    } else if (a->u_fd > b->u_fd) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
 // Add a file to the process file handle list.
-file_t proc_add_fd_raw(badge_err_t *ec, process_t *process, file_t real) {
-    proc_fd_t fd = {.real = real, .virt = 0};
+long proc_add_fd_raw(badge_err_t *ec, process_t *process, file_t k_fd) {
+    proc_fd_t fd = {.k_fd = k_fd, .u_fd = 0};
     for (size_t i = 0; i < process->fds_len; i++) {
-        if (process->fds[i].virt > fd.virt) {
-            fd.virt = process->fds[i].virt + 1;
+        if (process->fds[i].u_fd == fd.u_fd) {
+            fd.u_fd++;
+        } else if (process->fds[i].u_fd > fd.u_fd) {
+            break;
         }
     }
-    if (array_len_insert(&process->fds, sizeof(proc_fd_t), &process->fds_len, &fd, process->fds_len)) {
+    if (array_len_sorted_insert(&process->fds, sizeof(proc_fd_t), &process->fds_len, &fd, proc_fd_cmp_u)) {
         badge_err_set_ok(ec);
-        return fd.virt;
+        return fd.u_fd;
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
         return -1;
@@ -401,27 +416,27 @@ file_t proc_add_fd_raw(badge_err_t *ec, process_t *process, file_t real) {
 }
 
 // Find a file in the process file handle list.
-file_t proc_find_fd_raw(badge_err_t *ec, process_t *process, file_t virt) {
+file_t proc_find_fd_raw(badge_err_t *ec, process_t *process, long u_fd) {
     for (size_t i = 0; i < process->fds_len; i++) {
-        if (process->fds[i].virt == virt) {
+        if (process->fds[i].u_fd == u_fd) {
             badge_err_set_ok(ec);
-            return process->fds[i].real;
+            return process->fds[i].k_fd;
         }
     }
-    badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
+    badge_err_set(ec, ELOC_PROCESS, ECAUSE_BAD_FD);
     return -1;
 }
 
 // Remove a file from the process file handle list.
-void proc_remove_fd_raw(badge_err_t *ec, process_t *process, file_t virt) {
+void proc_remove_fd_raw(badge_err_t *ec, process_t *process, long u_fd) {
     for (size_t i = 0; i < process->fds_len; i++) {
-        if (process->fds[i].virt == virt) {
+        if (process->fds[i].u_fd == u_fd) {
             array_len_remove(&process->fds, sizeof(proc_fd_t), &process->fds_len, NULL, i);
             badge_err_set_ok(ec);
             return;
         }
     }
-    badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
+    badge_err_set(ec, ELOC_PROCESS, ECAUSE_BAD_FD);
 }
 
 
