@@ -52,7 +52,7 @@ void syscall_proc_exit(int code) {
 // If the memory was not large enough, it it not modified.
 size_t syscall_proc_getargs(size_t cap, void *memory) {
     process_t *const proc = proc_current();
-    mutex_acquire_shared(NULL, &proc->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc->mtx, TIMESTAMP_US_MAX);
 
     // Check required size.
     size_t required = proc->argv_size;
@@ -61,7 +61,7 @@ size_t syscall_proc_getargs(size_t cap, void *memory) {
         sigsegv_assert(copy_to_user_raw(proc, (size_t)memory, proc->argv, required), (size_t)memory);
     }
 
-    mutex_release_shared(NULL, &proc->mtx);
+    mutex_release_shared(&proc->mtx);
     return required;
 }
 
@@ -115,10 +115,10 @@ bool syscall_proc_pstart(int child) {
 void *syscall_proc_sighandler(int signum, void *newhandler) {
     sigsys_assert(signum >= 0 && signum < SIG_COUNT);
     process_t *const proc = proc_current();
-    mutex_acquire(NULL, &proc->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&proc->mtx, TIMESTAMP_US_MAX);
     void *old                 = (void *)proc->sighandlers[signum];
     proc->sighandlers[signum] = (size_t)newhandler;
-    mutex_release(NULL, &proc->mtx);
+    mutex_release(&proc->mtx);
     return old;
 }
 
@@ -139,7 +139,7 @@ NOASAN int syscall_proc_waitpid(int pid, int *wstatus, int options) {
     sysutil_memassert_rw(wstatus, sizeof(int));
 
     while (!(options & WNOHANG)) {
-        mutex_acquire_shared(NULL, &proc->mtx, TIMESTAMP_US_MAX);
+        mutex_acquire_shared(&proc->mtx, TIMESTAMP_US_MAX);
         process_t *node     = (process_t *)proc->children.head;
         bool       eligible = false;
         while (node) {
@@ -164,7 +164,7 @@ NOASAN int syscall_proc_waitpid(int pid, int *wstatus, int options) {
                 }
                 int  pid    = node->pid;
                 bool exited = node->flags & PROC_EXITED;
-                mutex_release_shared(NULL, &proc->mtx);
+                mutex_release_shared(&proc->mtx);
                 if (exited && !(options & WNOWAIT)) {
                     proc_delete(pid);
                 }
@@ -174,7 +174,7 @@ NOASAN int syscall_proc_waitpid(int pid, int *wstatus, int options) {
             node      = (process_t *)node->node.next;
             eligible |= node_eligible;
         }
-        mutex_release_shared(NULL, &proc->mtx);
+        mutex_release_shared(&proc->mtx);
         if (!eligible) {
             // No children with matching PIDs exist.
             return -ECHILD;
@@ -191,7 +191,7 @@ NOASAN int syscall_proc_waitpid(int pid, int *wstatus, int options) {
 // Temporary write system call.
 void syscall_temp_write(char const *message, size_t length) {
     sysutil_memassert_r(message, length);
-    mutex_acquire(NULL, &log_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&log_mtx, TIMESTAMP_US_MAX);
 #if MEMMAP_VMEM
     mmu_enable_sum();
 #endif
@@ -199,5 +199,5 @@ void syscall_temp_write(char const *message, size_t length) {
 #if MEMMAP_VMEM
     mmu_disable_sum();
 #endif
-    mutex_release(NULL, &log_mtx);
+    mutex_release(&log_mtx);
 }

@@ -402,7 +402,7 @@ static mutex_t vmm_mtx = MUTEX_T_INIT;
 
 // Allocare a kernel virtual address to a certain physical address.
 size_t memprotect_alloc_vaddr(size_t len) {
-    mutex_acquire(NULL, &vmm_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&vmm_mtx, TIMESTAMP_US_MAX);
     size_t pages = (len - 1) / MEMMAP_PAGE_SIZE + 3;
     size_t i;
     for (i = 0; i < vmm_free_len; i++) {
@@ -430,7 +430,7 @@ size_t memprotect_alloc_vaddr(size_t len) {
     } else {
         array_lencap_remove(&vmm_free, sizeof(vmm_info_t), &vmm_free_len, &vmm_free_cap, NULL, i);
     }
-    mutex_release(NULL, &vmm_mtx);
+    mutex_release(&vmm_mtx);
     return (range.vpn + 1) * MEMMAP_PAGE_SIZE;
 }
 
@@ -438,7 +438,7 @@ size_t memprotect_alloc_vaddr(size_t len) {
 void memprotect_free_vaddr(size_t vaddr) {
     assert_always(vaddr % MEMMAP_PAGE_SIZE == 0);
     size_t vpn = vaddr / MEMMAP_PAGE_SIZE - 1;
-    mutex_acquire(NULL, &vmm_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&vmm_mtx, TIMESTAMP_US_MAX);
 
     // Look up the in-use entry.
     array_binsearch_t res = array_binsearch(vmm_used, sizeof(vmm_info_t), vmm_used_len, &vpn, vmm_info_cmp);
@@ -473,7 +473,7 @@ void memprotect_free_vaddr(size_t vaddr) {
         );
     }
 
-    mutex_release(NULL, &vmm_mtx);
+    mutex_release(&vmm_mtx);
 }
 
 

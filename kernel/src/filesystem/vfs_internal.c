@@ -38,7 +38,7 @@ static vfs_file_obj_t *create_root_fobj(badge_err_t *ec, vfs_t *vfs) {
     }
 
     // Fill out common fields.
-    mutex_init(NULL, &obj->mutex, true);
+    mutex_init(&obj->mutex, true);
     obj->vfs      = vfs;
     obj->refcount = 1;
 
@@ -89,12 +89,12 @@ static vfs_file_obj_t *open_existing(vfs_t *vfs, inode_t inode) {
 
 // Open the root directory of the filesystem.
 vfs_file_obj_t *vfs_root_open(badge_err_t *ec, vfs_t *vfs) {
-    mutex_acquire(NULL, &objs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&objs_mtx, TIMESTAMP_US_MAX);
 
     // Try to get existing file object.
     vfs_file_obj_t *fobj = open_existing(vfs, vfs->inode_root);
     if (fobj) {
-        mutex_release(NULL, &objs_mtx);
+        mutex_release(&objs_mtx);
         badge_err_set_ok(ec);
         return fobj;
     }
@@ -102,7 +102,7 @@ vfs_file_obj_t *vfs_root_open(badge_err_t *ec, vfs_t *vfs) {
     // Create new file object.
     fobj = create_root_fobj(ec, vfs);
     if (!fobj) {
-        mutex_release(NULL, &objs_mtx);
+        mutex_release(&objs_mtx);
         return NULL;
     }
 
@@ -117,7 +117,7 @@ vfs_file_obj_t *vfs_root_open(badge_err_t *ec, vfs_t *vfs) {
         badge_err_set_ok(ec);
     }
 
-    mutex_release(NULL, &objs_mtx);
+    mutex_release(&objs_mtx);
 
     return fobj;
 }
@@ -330,12 +330,12 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
         return vfs_file_dup(dir->vfs->root_parent_obj);
     }
 
-    mutex_acquire(NULL, &objs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&objs_mtx, TIMESTAMP_US_MAX);
 
     // Try to get existing file object.
     vfs_file_obj_t *fobj = open_existing(dir->vfs, ent.inode);
     if (fobj) {
-        mutex_release(NULL, &objs_mtx);
+        mutex_release(&objs_mtx);
         badge_err_set_ok(ec);
         return fobj;
     }
@@ -351,7 +351,7 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
     if (!fobj->cookie) {
         goto err1;
     }
-    mutex_init(NULL, &fobj->mutex, true);
+    mutex_init(&fobj->mutex, true);
 
     // Open new file object.
     dir->vfs->vtable.file_open(ec, dir->vfs, dir, fobj, name, name_len);
@@ -375,7 +375,7 @@ vfs_file_obj_t *vfs_file_open(badge_err_t *ec, vfs_file_obj_t *dir, char const *
         badge_err_set_ok(ec);
     }
 
-    mutex_release(NULL, &objs_mtx);
+    mutex_release(&objs_mtx);
 
     return fobj;
 
@@ -384,7 +384,7 @@ err2:
 err1:
     free(fobj);
 err0:
-    mutex_release(NULL, &objs_mtx);
+    mutex_release(&objs_mtx);
     badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
     return NULL;
 }

@@ -436,7 +436,7 @@ int proc_map_contains_raw(process_t *proc, size_t vaddr, size_t size) {
 // Allocate more memory to a process.
 // Returns actual virtual address on success, 0 on failure.
 size_t proc_map(badge_err_t *ec, pid_t pid, size_t vaddr_req, size_t min_size, size_t min_align, int flags) {
-    mutex_acquire(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get(pid);
     size_t     res  = 0;
     if (proc) {
@@ -444,27 +444,27 @@ size_t proc_map(badge_err_t *ec, pid_t pid, size_t vaddr_req, size_t min_size, s
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }
-    mutex_release(NULL, &proc_mtx);
+    mutex_release(&proc_mtx);
     return res;
 }
 
 // Release memory allocated to a process.
 // The given span should not fall outside an area mapped with `proc_map_raw`.
 void proc_unmap(badge_err_t *ec, pid_t pid, size_t vaddr, size_t len) {
-    mutex_acquire(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get(pid);
     if (proc) {
         proc_unmap_raw(ec, proc, vaddr, len);
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }
-    mutex_release(NULL, &proc_mtx);
+    mutex_release(&proc_mtx);
 }
 
 // Whether the process owns this range of memory.
 // Returns the lowest common denominator of the access bits bitwise or 8.
 int proc_map_contains(badge_err_t *ec, pid_t pid, size_t base, size_t size) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get(pid);
     int        ret  = 0;
     if (proc) {
@@ -473,6 +473,6 @@ int proc_map_contains(badge_err_t *ec, pid_t pid, size_t base, size_t size) {
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return ret;
 }

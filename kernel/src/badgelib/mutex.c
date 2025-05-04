@@ -19,18 +19,16 @@
 
 
 // Recommended way to create a mutex at run-time.
-void mutex_init(badge_err_t *ec, mutex_t *mutex, bool shared) {
+void mutex_init(mutex_t *mutex, bool shared) {
     *mutex = ((mutex_t){shared, ATOMIC_FLAG_INIT, 0, {0}});
     atomic_thread_fence(memory_order_release);
-    badge_err_set_ok(ec);
 }
 
 // Clean up the mutex.
-void mutex_destroy(badge_err_t *ec, mutex_t *mutex) {
+void mutex_destroy(mutex_t *mutex) {
     // The mutex must always be completely unlocked to guarantee no threads are waiting on it.
     assert_always(mutex->shares == 0);
     assert_dev_drop(!atomic_flag_test_and_set(&mutex->wait_spinlock));
-    badge_err_set_ok(ec);
 }
 
 
@@ -153,7 +151,7 @@ static inline bool unequal_sub_atomic_int(mutex_t *mutex, int unequal0, int uneq
 
 // Try to acquire `mutex` within `timeout` microseconds.
 // Returns true if the mutex was successully acquired.
-bool mutex_acquire(badge_err_t *ec, mutex_t *mutex, timestamp_us_t timeout) {
+bool mutex_acquire(mutex_t *mutex, timestamp_us_t timeout) {
     // Compute timeout.
     timestamp_us_t now = time_us();
     if (timeout < 0 || timeout - TIMESTAMP_US_MAX + now >= 0) {
@@ -164,36 +162,31 @@ bool mutex_acquire(badge_err_t *ec, mutex_t *mutex, timestamp_us_t timeout) {
     // Await the shared portion to reach 0 and then lock.
     if (await_swap_atomic_int(mutex, timeout, 0, EXCLUSIVE_MAGIC, memory_order_acquire)) {
         // If that succeeds, the mutex was acquired.
-        badge_err_set_ok(ec);
         return true;
     } else {
         // Acquire failed.
-        badge_err_set(ec, ELOC_UNKNOWN, ECAUSE_TIMEOUT);
         return false;
     }
 }
 
 // Release `mutex`, if it was initially acquired by this thread.
 // Returns true if the mutex was successfully released.
-bool mutex_release(badge_err_t *ec, mutex_t *mutex) {
+bool mutex_release(mutex_t *mutex) {
     assert_dev_drop(atomic_load(&mutex->shares) >= EXCLUSIVE_MAGIC);
     if (await_swap_atomic_int(mutex, TIMESTAMP_US_MAX, EXCLUSIVE_MAGIC, 0, memory_order_release)) {
         // Successful release.
         mutex_notify(mutex);
-        badge_err_set_ok(ec);
         return true;
     } else {
         // Mutex was not taken exclusively.
-        badge_err_set(ec, ELOC_UNKNOWN, ECAUSE_ILLEGAL);
         return false;
     }
 }
 
 // Try to acquire a share in `mutex` within `timeout` microseconds.
 // Returns true if the share was successfully acquired.
-bool mutex_acquire_shared(badge_err_t *ec, mutex_t *mutex, timestamp_us_t timeout) {
+bool mutex_acquire_shared(mutex_t *mutex, timestamp_us_t timeout) {
     if (!mutex->is_shared) {
-        badge_err_set(ec, ELOC_UNKNOWN, ECAUSE_ILLEGAL);
         return false;
     }
     // Compute timeout.
@@ -206,27 +199,23 @@ bool mutex_acquire_shared(badge_err_t *ec, mutex_t *mutex, timestamp_us_t timeou
     // Take a share.
     if (thresh_add_atomic_int(mutex, timeout, EXCLUSIVE_MAGIC, memory_order_acquire)) {
         // If that succeeds, the mutex was successfully acquired.
-        badge_err_set_ok(ec);
         return true;
     } else {
         // If that fails, abort trying to lock.
-        badge_err_set(ec, ELOC_UNKNOWN, ECAUSE_TIMEOUT);
         return false;
     }
 }
 
 // Release `mutex`, if it was initially acquired by this thread.
 // Returns true if the mutex was successfully released.
-bool mutex_release_shared(badge_err_t *ec, mutex_t *mutex) {
+bool mutex_release_shared(mutex_t *mutex) {
     assert_dev_drop(atomic_load(&mutex->shares) < EXCLUSIVE_MAGIC);
     if (!unequal_sub_atomic_int(mutex, 0, EXCLUSIVE_MAGIC, memory_order_release)) {
         // Prevent the counter from underflowing.
-        badge_err_set(ec, ELOC_UNKNOWN, ECAUSE_ILLEGAL);
         return false;
     } else {
         // Successful release.
         mutex_notify(mutex);
-        badge_err_set_ok(ec);
         return true;
     }
 }

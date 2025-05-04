@@ -57,27 +57,27 @@ static bool proc_setargs_raw_unsafe(badge_err_t *ec, process_t *process, int arg
 
 // Send a signal to all running processes in the system except the init process.
 void proc_signal_all(int signal) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     for (size_t i = 0; i < procs_len; i++) {
         if (procs[i]->pid == 1)
             continue;
         proc_raise_signal_raw(NULL, procs[i], signal);
     }
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
 }
 
 // Whether any non-init processes are currently running.
 bool proc_has_noninit() {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     for (size_t i = 0; i < procs_len; i++) {
         if (procs[i]->pid == 1)
             continue;
         if (atomic_load(&procs[i]->flags) & PROC_RUNNING) {
-            mutex_release_shared(NULL, &proc_mtx);
+            mutex_release_shared(&proc_mtx);
             return true;
         }
     }
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return false;
 }
 
@@ -86,32 +86,32 @@ bool proc_has_noninit() {
 // Clean up: the housekeeping task.
 static void clean_up_from_housekeeping(int taskno, void *arg) {
     (void)taskno;
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get_unsafe((int)(ptrdiff_t)arg);
 
     // Delete run-time resources.
     proc_delete_runtime_raw(proc);
     if (!proc->parent) {
         // Init process during shutdown; delete right away.
-        mutex_release_shared(NULL, &proc_mtx);
+        mutex_release_shared(&proc_mtx);
         proc_delete((int)(ptrdiff_t)arg);
         return;
     }
 
     // Check whether parent ignores SIGCHLD.
-    mutex_acquire_shared(NULL, &proc->parent->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc->parent->mtx, TIMESTAMP_US_MAX);
     bool ignored = proc->parent->sighandlers[SIGCHLD] == SIG_IGN;
-    mutex_release_shared(NULL, &proc->parent->mtx);
+    mutex_release_shared(&proc->parent->mtx);
 
     if (ignored) {
         // Parent process ignores SIGCHLD; delete right away.
-        mutex_release_shared(NULL, &proc_mtx);
+        mutex_release_shared(&proc_mtx);
         proc_delete((int)(ptrdiff_t)arg);
     } else {
         // Signal parent process.
         atomic_fetch_or(&proc->flags, PROC_STATECHG);
         proc_raise_signal_raw(NULL, proc->parent, SIGCHLD);
-        mutex_release_shared(NULL, &proc_mtx);
+        mutex_release_shared(&proc_mtx);
     }
 }
 
@@ -120,10 +120,10 @@ void proc_exit_self(int code) {
     // Mark this process as exiting.
     sched_thread_t *thread  = sched_current_thread();
     process_t      *process = thread->process;
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
     atomic_fetch_or(&process->flags, PROC_EXITING);
     process->state_code = code;
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
 
     // Add deleting runtime to the housekeeping list.
     assert_always(hk_add_once(0, clean_up_from_housekeeping, (void *)(long)process->pid) != -1);
@@ -141,12 +141,12 @@ int proc_sort_pid_cmp(void const *a, void const *b) {
 // Create a new, empty process.
 process_t *proc_create_raw(badge_err_t *ec, pid_t parentpid, char const *binary, int argc, char const *const *argv) {
     // Get a new PID.
-    mutex_acquire(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *parent = proc_get_unsafe(parentpid);
     if (pid_counter == 1) {
         assert_dev_drop(parentpid <= 0);
     } else if (!parent) {
-        mutex_release(NULL, &proc_mtx);
+        mutex_release(&proc_mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
         return NULL;
     }
@@ -154,7 +154,7 @@ process_t *proc_create_raw(badge_err_t *ec, pid_t parentpid, char const *binary,
     // Allocate a process entry.
     process_t *handle = malloc(sizeof(process_t));
     if (!handle) {
-        mutex_release(NULL, &proc_mtx);
+        mutex_release(&proc_mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
         return NULL;
     }
@@ -194,7 +194,7 @@ process_t *proc_create_raw(badge_err_t *ec, pid_t parentpid, char const *binary,
     // Install arguments.
     if (!proc_setargs_raw_unsafe(ec, handle, argc, argv)) {
         free(handle);
-        mutex_release(NULL, &proc_mtx);
+        mutex_release(&proc_mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
         return NULL;
     }
@@ -204,7 +204,7 @@ process_t *proc_create_raw(badge_err_t *ec, pid_t parentpid, char const *binary,
     if (!array_lencap_insert(&procs, sizeof(process_t *), &procs_len, &procs_cap, NULL, res.index)) {
         free(handle->argv);
         free(handle);
-        mutex_release(NULL, &proc_mtx);
+        mutex_release(&proc_mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
         return NULL;
     }
@@ -213,24 +213,24 @@ process_t *proc_create_raw(badge_err_t *ec, pid_t parentpid, char const *binary,
 
     // Add to the parent process' child list.
     if (parent) {
-        mutex_acquire(NULL, &parent->mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&parent->mtx, TIMESTAMP_US_MAX);
         dlist_append(&parent->children, &handle->node);
-        mutex_release(NULL, &parent->mtx);
+        mutex_release(&parent->mtx);
     }
 
     // Initialise the empty memory map.
     memprotect_create(&handle->memmap.mpu_ctx);
 
-    mutex_release(NULL, &proc_mtx);
+    mutex_release(&proc_mtx);
     badge_err_set_ok(ec);
     return handle;
 }
 
 // Get a process handle by ID.
 process_t *proc_get(pid_t pid) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *res = proc_get_unsafe(pid);
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return res;
 }
 
@@ -303,27 +303,27 @@ void proc_start_raw(badge_err_t *ec, process_t *process) {
         return;
     }
 
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
 
     // Load the executable.
     kbelf_dyn dyn = kbelf_dyn_create(process->pid);
     if (!dyn) {
         logkf(LOG_ERROR, "Out of memory to start %{cs}", process->binary);
-        mutex_release(NULL, &process->mtx);
+        mutex_release(&process->mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
         return;
     }
     if (!kbelf_dyn_set_exec(dyn, process->binary, NULL)) {
         logkf(LOG_ERROR, "Failed to open %{cs}", process->binary);
         kbelf_dyn_destroy(dyn);
-        mutex_release(NULL, &process->mtx);
+        mutex_release(&process->mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
         return;
     }
     if (!kbelf_dyn_load(dyn)) {
         kbelf_dyn_destroy(dyn);
         logkf(LOG_ERROR, "Failed to load %{cs}", process->binary);
-        mutex_release(NULL, &process->mtx);
+        mutex_release(&process->mtx);
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_FORMAT);
         return;
     }
@@ -333,13 +333,13 @@ void proc_start_raw(badge_err_t *ec, process_t *process) {
     if (!thread) {
         kbelf_dyn_unload(dyn);
         kbelf_dyn_destroy(dyn);
-        mutex_release(NULL, &process->mtx);
+        mutex_release(&process->mtx);
         return;
     }
     port_fencei();
     atomic_store(&process->flags, PROC_RUNNING);
     thread_resume(ec, thread);
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
     kbelf_dyn_destroy(dyn);
     logkf(LOG_INFO, "Process %{d} started", process->pid);
 }
@@ -457,10 +457,10 @@ bool proc_signals_pending_raw(process_t *process) {
 
 // Raise SIGKILL to a process.
 static void proc_raise_sigkill_raw(process_t *process) {
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
     atomic_fetch_or(&process->flags, PROC_EXITING);
     process->state_code = W_SIGNALLED(SIGKILL);
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
 
     // Add deleting runtime to the housekeeping list.
     assert_always(hk_add_once(0, clean_up_from_housekeeping, (void *)(long)process->pid) != -1);
@@ -473,7 +473,7 @@ void proc_raise_signal_raw(badge_err_t *ec, process_t *process, int signum) {
         badge_err_set_ok(ec);
         return;
     }
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
     sigpending_t *node = malloc(sizeof(sigpending_t));
     if (!node) {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOMEM);
@@ -482,29 +482,29 @@ void proc_raise_signal_raw(badge_err_t *ec, process_t *process, int signum) {
         dlist_append(&process->sigpending, &node->node);
         atomic_fetch_or(&process->flags, PROC_SIGPEND);
     }
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
 }
 
 
 
 // Suspend all threads for a process except the current.
 void proc_suspend(process_t *process, tid_t current) {
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
     for (size_t i = 0; i < process->threads_len; i++) {
         if (process->threads[i] != current) {
             thread_suspend(NULL, process->threads[i], false);
         }
     }
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
 }
 
 // Resume all threads for a process.
 void proc_resume(process_t *process) {
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
     for (size_t i = 0; i < process->threads_len; i++) {
         thread_resume(NULL, process->threads[i]);
     }
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
 }
 
 // Release all process runtime resources (threads, memory, files, etc.).
@@ -522,10 +522,10 @@ void proc_delete_runtime_raw(process_t *process) {
     }
 
     // Set the exiting flag so any return to user-mode kills the thread.
-    mutex_acquire(NULL, &process->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&process->mtx, TIMESTAMP_US_MAX);
     if (atomic_load(&process->flags) & PROC_EXITED) {
         // Already exited, return now.
-        mutex_release(NULL, &process->mtx);
+        mutex_release(&process->mtx);
         return;
     } else {
         // Flag the scheduler to start suspending threads.
@@ -562,7 +562,7 @@ void proc_delete_runtime_raw(process_t *process) {
     atomic_fetch_or(&process->flags, PROC_EXITED);
     atomic_fetch_and(&process->flags, ~PROC_EXITING & ~PROC_RUNNING);
     logkf(LOG_INFO, "Process %{d} stopped with code %{d}", process->pid, process->state_code);
-    mutex_release(NULL, &process->mtx);
+    mutex_release(&process->mtx);
 }
 
 
@@ -575,19 +575,19 @@ pid_t proc_create(badge_err_t *ec, pid_t parent, char const *binary, int argc, c
 
 // Delete a process and release any resources it had.
 static bool proc_delete_impl(pid_t pid, bool only_prestart) {
-    mutex_acquire(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&proc_mtx, TIMESTAMP_US_MAX);
     process_t         dummy     = {.pid = pid};
     process_t        *dummy_ptr = &dummy;
     array_binsearch_t res       = array_binsearch(procs, sizeof(process_t *), procs_len, &dummy_ptr, proc_sort_pid_cmp);
     if (!res.found) {
-        mutex_release(NULL, &proc_mtx);
+        mutex_release(&proc_mtx);
         return false;
     }
     process_t *handle = procs[res.index];
 
     // Check for pre-start-ness.
     if (only_prestart && !(atomic_load(&handle->flags) & PROC_PRESTART)) {
-        mutex_release(NULL, &proc_mtx);
+        mutex_release(&proc_mtx);
         return false;
     }
 
@@ -597,9 +597,9 @@ static bool proc_delete_impl(pid_t pid, bool only_prestart) {
     // Remove from parent's child list.
     process_t *parent = handle->parent;
     if (parent) {
-        mutex_acquire(NULL, &parent->mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&parent->mtx, TIMESTAMP_US_MAX);
         dlist_remove(&parent->children, &handle->node);
-        mutex_release(NULL, &parent->mtx);
+        mutex_release(&parent->mtx);
     }
 
     // Release kernel memory allocated to process.
@@ -607,7 +607,7 @@ static bool proc_delete_impl(pid_t pid, bool only_prestart) {
     free(handle->argv);
     free(handle);
     array_lencap_remove(&procs, sizeof(process_t *), &procs_len, &procs_cap, NULL, res.index);
-    mutex_release(NULL, &proc_mtx);
+    mutex_release(&proc_mtx);
 
     return true;
 }
@@ -624,7 +624,7 @@ void proc_delete(pid_t pid) {
 
 // Get the process' flags.
 uint32_t proc_getflags(badge_err_t *ec, pid_t pid) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get(pid);
     uint32_t   flags;
     if (proc) {
@@ -634,43 +634,43 @@ uint32_t proc_getflags(badge_err_t *ec, pid_t pid) {
         flags = 0;
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return flags;
 }
 
 
 // Load an executable and start a prepared process.
 void proc_start(badge_err_t *ec, pid_t pid) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get_unsafe(pid);
     if (proc) {
         proc_start_raw(ec, proc);
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
 }
 
 // Check whether a process is a parent to another.
 bool proc_is_parent(pid_t parent, pid_t child) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *parent_proc = proc_get_unsafe(parent);
     process_t *child_proc  = proc_get_unsafe(child);
     bool       eq          = child_proc && child_proc->parent == parent_proc;
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return eq;
 }
 
 // Raise a signal to a process' main thread, while suspending it's other threads.
 void proc_raise_signal(badge_err_t *ec, pid_t pid, int signum) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     process_t *proc = proc_get(pid);
     if (proc) {
         proc_raise_signal_raw(ec, proc, signum);
     } else {
         badge_err_set(ec, ELOC_PROCESS, ECAUSE_NOTFOUND);
     }
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
 }
 
 
@@ -678,9 +678,9 @@ void proc_raise_signal(badge_err_t *ec, pid_t pid, int signum) {
 // Determine string length in memory a user owns.
 // Returns -1 if the user doesn't have access to any byte in the string.
 ptrdiff_t strlen_from_user(pid_t pid, size_t user_vaddr, ptrdiff_t max_len) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     ptrdiff_t res = strlen_from_user_raw(proc_get_unsafe(pid), user_vaddr, max_len);
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return res;
 }
 
@@ -688,9 +688,9 @@ ptrdiff_t strlen_from_user(pid_t pid, size_t user_vaddr, ptrdiff_t max_len) {
 // Returns whether the user has access to all of these bytes.
 // If the user doesn't have access, no copy is performed.
 bool copy_from_user(pid_t pid, void *kernel_vaddr, size_t user_vaddr, size_t len) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     bool res = copy_from_user_raw(proc_get_unsafe(pid), kernel_vaddr, user_vaddr, len);
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return res;
 }
 
@@ -698,8 +698,8 @@ bool copy_from_user(pid_t pid, void *kernel_vaddr, size_t user_vaddr, size_t len
 // Returns whether the user has access to all of these bytes.
 // If the user doesn't have access, no copy is performed.
 bool copy_to_user(pid_t pid, size_t user_vaddr, void *const kernel_vaddr, size_t len) {
-    mutex_acquire_shared(NULL, &proc_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&proc_mtx, TIMESTAMP_US_MAX);
     bool res = copy_to_user_raw(proc_get_unsafe(pid), user_vaddr, kernel_vaddr, len);
-    mutex_release_shared(NULL, &proc_mtx);
+    mutex_release_shared(&proc_mtx);
     return res;
 }

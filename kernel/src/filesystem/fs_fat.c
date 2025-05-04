@@ -157,7 +157,7 @@ static uint32_t read_fat_ent(badge_err_t *ec, vfs_t *vfs, uint32_t index) {
     base           *= FATFS(vfs).bytes_per_sector;
     switch (FATFS(vfs).type) {
         case FAT12: {
-            mutex_acquire_shared(NULL, &FATFS(vfs).fat12_mutex, TIMESTAMP_US_MAX);
+            mutex_acquire_shared(&FATFS(vfs).fat12_mutex, TIMESTAMP_US_MAX);
             // Read FAT12 entry.
             uint8_t raw[2];
             blkdev_read_bytes(ec, vfs->media, base + index * 3 / 2, raw, 2);
@@ -172,7 +172,7 @@ static uint32_t read_fat_ent(badge_err_t *ec, vfs_t *vfs, uint32_t index) {
             if (ent >= 0xff7) {
                 ent |= 0x0ffff000;
             }
-            mutex_release_shared(NULL, &FATFS(vfs).fat12_mutex);
+            mutex_release_shared(&FATFS(vfs).fat12_mutex);
             return ent;
         }
 
@@ -210,7 +210,7 @@ static void write_fat_ent(badge_err_t *ec, vfs_t *vfs, uint32_t index, uint32_t 
     base            *= FATFS(vfs).bytes_per_sector;
     switch (FATFS(vfs).type) {
         case FAT12: {
-            mutex_acquire(NULL, &FATFS(vfs).fat12_mutex, TIMESTAMP_US_MAX);
+            mutex_acquire(&FATFS(vfs).fat12_mutex, TIMESTAMP_US_MAX);
             // Adjust value to fit into 12 bits.
             assert_dev_drop(!FS_FAT_IS_FAT_ALLOC(entry) || entry < 0x0ff7);
             entry &= 0x0fff;
@@ -219,7 +219,7 @@ static void write_fat_ent(badge_err_t *ec, vfs_t *vfs, uint32_t index, uint32_t 
             uint8_t raw[2];
             blkdev_read_bytes(ec, vfs->media, base + index * 3 / 2, raw, 2);
             if (!badge_err_is_ok(ec)) {
-                mutex_release(NULL, &FATFS(vfs).fat12_mutex);
+                mutex_release(&FATFS(vfs).fat12_mutex);
                 return;
             }
 
@@ -234,7 +234,7 @@ static void write_fat_ent(badge_err_t *ec, vfs_t *vfs, uint32_t index, uint32_t 
 
             // Write back.
             blkdev_write_bytes(ec, vfs->media, base + index * 3 / 2, raw, 2);
-            mutex_release(NULL, &FATFS(vfs).fat12_mutex);
+            mutex_release(&FATFS(vfs).fat12_mutex);
         } break;
 
         case FAT16: {
@@ -492,7 +492,7 @@ bool fs_fat_mount(badge_err_t *ec, vfs_t *vfs) {
     // Determine filesystem type.
     if (FATFS(vfs).cluster_count < 4085) {
         FATFS(vfs).type = FAT12;
-        mutex_init(NULL, &FATFS(vfs).fat12_mutex, true);
+        mutex_init(&FATFS(vfs).fat12_mutex, true);
     } else if (FATFS(vfs).cluster_count < 65525) {
         FATFS(vfs).type = FAT16;
     } else {

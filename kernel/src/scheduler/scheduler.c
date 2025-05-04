@@ -385,21 +385,21 @@ void sched_start_altcpus() {
 // Power on and start scheduler on another CPU.
 bool sched_start_on(int cpu) {
     static mutex_t start_mutex = MUTEX_T_INIT;
-    mutex_acquire(NULL, &start_mutex, TIMESTAMP_US_MAX);
+    mutex_acquire(&start_mutex, TIMESTAMP_US_MAX);
 
     // Tell SMP to power on the other CPU.
     void *tmp_stack  = malloc(CONFIG_STACK_SIZE);
     bool  poweron_ok = smp_poweron(cpu, sched_exec, tmp_stack + CONFIG_STACK_SIZE);
     if (poweron_ok) {
-        mutex_acquire(NULL, &log_mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&log_mtx, TIMESTAMP_US_MAX);
         while (!(atomic_load(&cpu_ctx[cpu]->flags) & SCHED_RUNNING)) continue;
-        mutex_release(NULL, &log_mtx);
+        mutex_release(&log_mtx);
     } else {
         logkf(LOG_ERROR, "Starting CPU%{d} failed", cpu);
     }
 
     free(tmp_stack);
-    mutex_release(NULL, &start_mutex);
+    mutex_release(&start_mutex);
 
     return poweron_ok;
 }

@@ -58,7 +58,7 @@ int hk_thread_func(void *ignored) {
     (void)ignored;
 
     while (1) {
-        mutex_acquire(NULL, &hk_mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&hk_mtx, TIMESTAMP_US_MAX);
         timestamp_us_t now  = time_us();
         taskent_t      task = {0};
 
@@ -79,7 +79,7 @@ int hk_thread_func(void *ignored) {
             }
         }
 
-        mutex_release(NULL, &hk_mtx);
+        mutex_release(&hk_mtx);
         thread_yield();
     }
 }
@@ -109,7 +109,7 @@ int hk_add_repeated(timestamp_us_t time, timestamp_us_t interval, hk_task_t task
     if (!task) {
         return -1;
     }
-    mutex_acquire(NULL, &hk_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&hk_mtx, TIMESTAMP_US_MAX);
 
     int       taskno = taskno_ctr;
     taskent_t ent    = {
@@ -127,18 +127,18 @@ int hk_add_repeated(timestamp_us_t time, timestamp_us_t interval, hk_task_t task
             array_lencap_sorted_insert(&queue, sizeof(taskent_t), &queue_len, &queue_cap, &ent, hk_task_time_cmp);
     }
 
-    mutex_release(NULL, &hk_mtx);
+    mutex_release(&hk_mtx);
     return taskno;
 }
 
 // Cancel a housekeeping task.
 void hk_cancel(int taskno) {
-    mutex_acquire(NULL, &hk_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&hk_mtx, TIMESTAMP_US_MAX);
     for (size_t i = 0; i < queue_len; i++) {
         if (queue[i].taskno == taskno) {
             array_lencap_remove(&queue, sizeof(taskent_t), &queue_len, &queue_cap, NULL, i);
             return;
         }
     }
-    mutex_release(NULL, &hk_mtx);
+    mutex_release(&hk_mtx);
 }

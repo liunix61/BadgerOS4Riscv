@@ -251,11 +251,11 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void) {
  */
 uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout0) {
     timestamp_us_t timeout = timeout0 == 0xffff ? TIMESTAMP_US_MAX : timeout0 * 1000;
-    return mutex_acquire(NULL, handle, timeout) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
+    return mutex_acquire(handle, timeout) ? UACPI_STATUS_OK : UACPI_STATUS_TIMEOUT;
 }
 
 void uacpi_kernel_release_mutex(uacpi_handle handle) {
-    mutex_release(NULL, handle);
+    mutex_release(handle);
 }
 
 /*

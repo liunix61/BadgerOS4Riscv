@@ -143,7 +143,7 @@ static void fd_drop_ref(badge_err_t *ec, vfs_file_desc_t *fd) {
 
 // Helper to get FD pointer from file number and increase refcount.
 static vfs_file_desc_t *get_fd_ptr(badge_err_t *ec, file_t fileno) {
-    mutex_acquire_shared(NULL, &files_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&files_mtx, TIMESTAMP_US_MAX);
     array_binsearch_t res =
         array_binsearch(files, sizeof(void *), files_len, (void *)(ptrdiff_t)fileno, vfs_file_desc_id_search);
     vfs_file_desc_t *fd = NULL;
@@ -154,7 +154,7 @@ static vfs_file_desc_t *get_fd_ptr(badge_err_t *ec, file_t fileno) {
     } else {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_BAD_FD);
     }
-    mutex_release_shared(NULL, &files_mtx);
+    mutex_release_shared(&files_mtx);
     return fd;
 }
 
@@ -285,7 +285,7 @@ void fs_mount(
     }
 
     // Mount the filesystem.
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
     vfs_file_drop_ref(ec, at_obj);
     if (!badge_err_is_ok(ec)) {
@@ -295,7 +295,7 @@ void fs_mount(
         if (res.parent) {
             vfs_file_drop_ref(NULL, res.parent);
         }
-        mutex_release(NULL, &dirs_mtx);
+        mutex_release(&dirs_mtx);
         return;
     }
     if (!res.file) {
@@ -316,7 +316,7 @@ void fs_mount(
     if (res.parent) {
         vfs_file_drop_ref(badge_err_is_ok(ec) ? ec : NULL, res.parent);
     }
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 }
 
 // Try to unmount a filesystem.
@@ -366,7 +366,7 @@ void fs_stat(badge_err_t *ec, file_t fd, char const *path, size_t path_len, bool
             fd_drop_ref(ec, at_fd);
         }
 
-        mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
 
         // Walk the filesystem.
         walk_t res = walk(ec, at_obj, path, path_len, false);
@@ -379,7 +379,7 @@ void fs_stat(badge_err_t *ec, file_t fd, char const *path, size_t path_len, bool
         }
         to_stat = res.file;
 
-        mutex_release(NULL, &dirs_mtx);
+        mutex_release(&dirs_mtx);
 
     } else if (fd != FILE_NONE) {
         // Get the file/dir to stat directly from `fd`.
@@ -428,7 +428,7 @@ void fs_mkdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         }
     }
 
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
     vfs_file_drop_ref(ec, at_obj);
     if (!badge_err_is_ok(ec)) {
@@ -438,7 +438,7 @@ void fs_mkdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         if (res.parent) {
             vfs_file_drop_ref(NULL, res.parent);
         }
-        mutex_release(NULL, &dirs_mtx);
+        mutex_release(&dirs_mtx);
         return;
     }
     if (res.file) {
@@ -452,7 +452,7 @@ void fs_mkdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
     } else {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
     }
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 }
 
 // Open a directory for reading relative to a dir handle.
@@ -483,7 +483,7 @@ void fs_rmdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         fd_drop_ref(ec, at_fd);
     }
 
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t res = walk(ec, at_obj, path, path_len, false);
@@ -495,7 +495,7 @@ void fs_rmdir(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
     }
 
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 
     // Clean up.
     if (res.file) {
@@ -520,9 +520,9 @@ dirent_list_t fs_dir_read(badge_err_t *ec, file_t dir) {
     if (!fd) {
         return (dirent_list_t){0};
     }
-    mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&fd->obj->mutex, TIMESTAMP_US_MAX);
     dirent_list_t res = vfs_dir_read(ec, fd->obj);
-    mutex_release_shared(NULL, &fd->obj->mutex);
+    mutex_release_shared(&fd->obj->mutex);
     return res;
 }
 
@@ -552,7 +552,7 @@ void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         fd_drop_ref(ec, at_fd);
     }
 
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t res = walk(ec, at_obj, path, path_len, false);
@@ -564,7 +564,7 @@ void fs_unlink(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
     }
 
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 
     // Clean up.
     if (res.file) {
@@ -621,7 +621,7 @@ void fs_link(
         fd_drop_ref(ec, old_at_fd);
     }
 
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t old_res = walk(ec, old_at_obj, old_path, old_path_len, false);
@@ -638,7 +638,7 @@ void fs_link(
         vfs_link(ec, old_res.file, new_res.parent, new_res.filename, new_res.filename_len);
     }
 
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 
     // Clean up.
     if (old_res.file) {
@@ -685,7 +685,7 @@ void fs_symlink(
         fd_drop_ref(ec, at_fd);
     }
 
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
 
     // Walk the filesystem.
     walk_t res = walk(ec, link_at_obj, link_path, link_path_len, false);
@@ -698,7 +698,7 @@ void fs_symlink(
         vfs_symlink(ec, target_path, target_path_len, res.parent, res.filename, res.filename_len);
     }
 
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 
     // Clean up.
     if (res.file) {
@@ -737,7 +737,7 @@ void fs_mkfifo(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         }
     }
 
-    mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
     walk_t res = walk(ec, at_obj, path, path_len, true);
     vfs_file_drop_ref(ec, at_obj);
     if (!badge_err_is_ok(ec)) {
@@ -747,7 +747,7 @@ void fs_mkfifo(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
         if (res.parent) {
             vfs_file_drop_ref(NULL, res.parent);
         }
-        mutex_release(NULL, &dirs_mtx);
+        mutex_release(&dirs_mtx);
         return;
     }
     if (res.file) {
@@ -761,7 +761,7 @@ void fs_mkfifo(badge_err_t *ec, file_t at, char const *path, size_t path_len) {
     } else {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOENT);
     }
-    mutex_release(NULL, &dirs_mtx);
+    mutex_release(&dirs_mtx);
 }
 
 
@@ -804,11 +804,11 @@ fs_pipe_t fs_pipe(badge_err_t *ec, int flags) {
     writer->obj      = vfs_pipes.writer;
 
 
-    mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&files_mtx, TIMESTAMP_US_MAX);
 
     // Insert both into the files array.
     if (!array_lencap_insert(&files, sizeof(void *), &files_len, &files_cap, &reader, files_len)) {
-        mutex_release(NULL, &files_mtx);
+        mutex_release(&files_mtx);
         vfs_file_drop_ref(NULL, reader->obj);
         vfs_file_drop_ref(NULL, writer->obj);
         free(reader);
@@ -820,7 +820,7 @@ fs_pipe_t fs_pipe(badge_err_t *ec, int flags) {
 
     if (!array_lencap_insert(&files, sizeof(void *), &files_len, &files_cap, &writer, files_len)) {
         files_len--;
-        mutex_release(NULL, &files_mtx);
+        mutex_release(&files_mtx);
         vfs_file_drop_ref(NULL, reader->obj);
         vfs_file_drop_ref(NULL, writer->obj);
         free(reader);
@@ -830,7 +830,7 @@ fs_pipe_t fs_pipe(badge_err_t *ec, int flags) {
     }
     writer->fileno = fileno_ctr++;
 
-    mutex_release(NULL, &files_mtx);
+    mutex_release(&files_mtx);
 
     return (fs_pipe_t){
         .reader = reader->fileno,
@@ -891,9 +891,9 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
 
     // Lock dir modifications.
     if (oflags & OFLAGS_CREATE) {
-        mutex_acquire(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&dirs_mtx, TIMESTAMP_US_MAX);
     } else {
-        mutex_acquire_shared(NULL, &dirs_mtx, TIMESTAMP_US_MAX);
+        mutex_acquire_shared(&dirs_mtx, TIMESTAMP_US_MAX);
     }
 
     // Walk the filesystem.
@@ -910,9 +910,9 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
 
     // Unlock dir modifications.
     if (oflags & OFLAGS_CREATE) {
-        mutex_release(NULL, &dirs_mtx);
+        mutex_release(&dirs_mtx);
     } else {
-        mutex_release_shared(NULL, &dirs_mtx);
+        mutex_release_shared(&dirs_mtx);
     }
 
     if (res.parent) {
@@ -948,11 +948,11 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
     fd->nonblock        = oflags & OFLAGS_NONBLOCK;
     fd->refcount        = 1;
 
-    mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&files_mtx, TIMESTAMP_US_MAX);
 
     // Insert handle into files array.
     if (!array_lencap_insert(&files, sizeof(void *), &files_len, &files_cap, &fd, files_len)) {
-        mutex_release(NULL, &files_mtx);
+        mutex_release(&files_mtx);
         vfs_file_drop_ref(NULL, fd->obj);
         free(fd);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
@@ -960,14 +960,14 @@ file_t fs_open(badge_err_t *ec, file_t at, char const *path, size_t path_len, of
     }
     fd->fileno = fileno_ctr++;
 
-    mutex_release(NULL, &files_mtx);
+    mutex_release(&files_mtx);
     return fd->fileno;
 }
 
 // Close a file opened by `fs_open`.
 // Only raises an error if `file` is an invalid file descriptor.
 void fs_close(badge_err_t *ec, file_t file) {
-    mutex_acquire(NULL, &files_mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&files_mtx, TIMESTAMP_US_MAX);
     array_binsearch_t res =
         array_binsearch(files, sizeof(void *), files_len, (void *)(ptrdiff_t)file, vfs_file_desc_id_search);
     if (res.found) {
@@ -976,11 +976,11 @@ void fs_close(badge_err_t *ec, file_t file) {
         if (fd->obj->type == FILETYPE_FIFO) {
             vfs_fifo_close(fd->obj->fifo, fd->read, fd->write);
         }
-        mutex_release(NULL, &files_mtx);
+        mutex_release(&files_mtx);
         fd_drop_ref(ec, fd);
         badge_err_set_ok(ec);
     } else {
-        mutex_release(NULL, &files_mtx);
+        mutex_release(&files_mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PARAM);
     }
 }
@@ -1013,7 +1013,7 @@ fileoff_t fs_read(badge_err_t *ec, file_t file, void *readbuf, fileoff_t readlen
 
     } else {
         // Regular file reads.
-        mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+        mutex_acquire_shared(&fd->obj->mutex, TIMESTAMP_US_MAX);
         fileoff_t offset = fd->offset;
         if (offset > fd->obj->size) {
             offset = fd->obj->size;
@@ -1025,7 +1025,7 @@ fileoff_t fs_read(badge_err_t *ec, file_t file, void *readbuf, fileoff_t readlen
         if (badge_err_is_ok(ec)) {
             fd->offset = offset + readlen;
         }
-        mutex_release_shared(NULL, &fd->obj->mutex);
+        mutex_release_shared(&fd->obj->mutex);
     }
 
     fd_drop_ref(ec, fd);
@@ -1076,7 +1076,7 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
 
     } else if (fd->append) {
         // Append writes are atomic and require exclusive locking.
-        mutex_acquire(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+        mutex_acquire(&fd->obj->mutex, TIMESTAMP_US_MAX);
         fd->offset       = fd->obj->size;
         fileoff_t newlen = fd->obj->size + writelen;
         if (newlen > fd->obj->size) {
@@ -1088,7 +1088,7 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
                 }
             }
         }
-        mutex_release(NULL, &fd->obj->mutex);
+        mutex_release(&fd->obj->mutex);
         if (newlen < fd->obj->size) {
             badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOSPACE);
             writelen = -1;
@@ -1096,7 +1096,7 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
 
     } else {
         // Non-append writes may still resize the file but are not atomic.
-        mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+        mutex_acquire_shared(&fd->obj->mutex, TIMESTAMP_US_MAX);
         fileoff_t offset = fd->offset;
         if (offset + writelen >= offset) {
             if (offset > fd->obj->size) {
@@ -1105,8 +1105,8 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
 
             while (offset + writelen > fd->obj->size) {
                 // Grow the file.
-                mutex_release_shared(NULL, &fd->obj->mutex); // TODO: It brokey her.e
-                mutex_acquire(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+                mutex_release_shared(&fd->obj->mutex); // TODO: It brokey her.e
+                mutex_acquire(&fd->obj->mutex, TIMESTAMP_US_MAX);
 
                 // Mutex was released for a moment, check size again.
                 if (offset > fd->obj->size) {
@@ -1116,8 +1116,8 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
                     vfs_file_resize(ec, fd->obj, fd->offset + writelen);
                 }
 
-                mutex_release(NULL, &fd->obj->mutex);
-                mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+                mutex_release(&fd->obj->mutex);
+                mutex_acquire_shared(&fd->obj->mutex, TIMESTAMP_US_MAX);
             }
 
             // Now that we can assume the file is large enough, perform the write.
@@ -1128,7 +1128,7 @@ fileoff_t fs_write(badge_err_t *ec, file_t file, void const *writebuf, fileoff_t
                 }
             }
         }
-        mutex_release_shared(NULL, &fd->obj->mutex);
+        mutex_release_shared(&fd->obj->mutex);
         if (offset + writelen < offset) {
             badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOSPACE);
             writelen = -1;
@@ -1149,12 +1149,12 @@ fileoff_t fs_tell(badge_err_t *ec, file_t file) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSEEKABLE);
         return -1;
     }
-    mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&fd->obj->mutex, TIMESTAMP_US_MAX);
     fileoff_t tmp = fd->offset;
     if (tmp > fd->obj->size) {
         tmp = fd->obj->size;
     }
-    mutex_release_shared(NULL, &fd->obj->mutex);
+    mutex_release_shared(&fd->obj->mutex);
     fd_drop_ref(ec, fd);
     return tmp;
 }
@@ -1170,7 +1170,7 @@ fileoff_t fs_seek(badge_err_t *ec, file_t file, fileoff_t off, fs_seek_t seekmod
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_UNSEEKABLE);
         return -1;
     }
-    mutex_acquire_shared(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+    mutex_acquire_shared(&fd->obj->mutex, TIMESTAMP_US_MAX);
     if (seekmode == SEEK_END) {
         off += fd->obj->size;
     } else if (seekmode == SEEK_CUR) {
@@ -1182,7 +1182,7 @@ fileoff_t fs_seek(badge_err_t *ec, file_t file, fileoff_t off, fs_seek_t seekmod
         off = fd->obj->size;
     }
     fd->offset = off;
-    mutex_release_shared(NULL, &fd->obj->mutex);
+    mutex_release_shared(&fd->obj->mutex);
     fd_drop_ref(ec, fd);
     return off;
 }
@@ -1196,9 +1196,9 @@ void fs_flush(badge_err_t *ec, file_t file) {
     if (!fd) {
         // TODO.
     } else {
-        mutex_acquire(NULL, &fd->obj->mutex, TIMESTAMP_US_MAX);
+        mutex_acquire(&fd->obj->mutex, TIMESTAMP_US_MAX);
         vfs_file_flush(ec, fd->obj);
-        mutex_release(NULL, &fd->obj->mutex);
+        mutex_release(&fd->obj->mutex);
         fd_drop_ref(ec, fd);
     }
 }

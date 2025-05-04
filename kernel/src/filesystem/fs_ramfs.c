@@ -121,13 +121,13 @@ static fs_ramfs_inode_t *
     if (name_len > VFS_RAMFS_NAME_MAX) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_TOOLONG);
     }
-    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     // Test whether the file already exists.
     fs_ramfs_inode_t  *dirptr   = RAMFILE(dir);
     fs_ramfs_dirent_t *existing = find_dirent(ec, vfs, dirptr, name, name_len);
     if (existing) {
-        mutex_release(NULL, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
         return NULL;
     }
@@ -135,7 +135,7 @@ static fs_ramfs_inode_t *
     // Find a vacant inode to assign.
     ptrdiff_t inum = find_inode(vfs);
     if (inum == -1) {
-        mutex_release(NULL, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOSPACE);
         return NULL;
     }
@@ -168,7 +168,7 @@ static fs_ramfs_inode_t *
         RAMFS(vfs).inode_usage[inum] = true;
     }
 
-    mutex_release(NULL, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
     return iptr;
 }
 
@@ -211,7 +211,7 @@ bool fs_ramfs_mount(badge_err_t *ec, vfs_t *vfs) {
         return false;
     }
     vfs->inode_root = VFS_RAMFS_INODE_ROOT;
-    mutex_init(ec, &RAMFS(vfs).mtx, true);
+    mutex_init(&RAMFS(vfs).mtx, true);
     badge_err_assert_dev(ec);
 
     // Clear inode usage.
@@ -242,7 +242,7 @@ bool fs_ramfs_mount(badge_err_t *ec, vfs_t *vfs) {
         free(iptr->buf);
         free(RAMFS(vfs).inode_list);
         free(RAMFS(vfs).inode_usage);
-        mutex_destroy(NULL, &RAMFS(vfs).mtx);
+        mutex_destroy(&RAMFS(vfs).mtx);
         return false;
     }
 
@@ -254,7 +254,7 @@ bool fs_ramfs_mount(badge_err_t *ec, vfs_t *vfs) {
         free(iptr->buf);
         free(RAMFS(vfs).inode_list);
         free(RAMFS(vfs).inode_usage);
-        mutex_destroy(NULL, &RAMFS(vfs).mtx);
+        mutex_destroy(&RAMFS(vfs).mtx);
         return false;
     }
 
@@ -263,7 +263,7 @@ bool fs_ramfs_mount(badge_err_t *ec, vfs_t *vfs) {
 
 // Unmount a ramfs filesystem.
 void fs_ramfs_umount(vfs_t *vfs) {
-    mutex_destroy(NULL, &RAMFS(vfs).mtx);
+    mutex_destroy(&RAMFS(vfs).mtx);
     free(RAMFS(vfs).inode_list);
     free(RAMFS(vfs).inode_usage);
 }
@@ -333,13 +333,13 @@ void fs_ramfs_unlink(
         return;
     }
 
-    assert_always(mutex_acquire(ec, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     // Find the directory entry with the given name.
     fs_ramfs_inode_t  *dirptr = RAMFILE(dir);
     fs_ramfs_dirent_t *ent    = find_dirent(ec, vfs, dirptr, name, name_len);
     if (!ent) {
-        mutex_release(NULL, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
         return;
     }
@@ -351,7 +351,7 @@ void fs_ramfs_unlink(
         // Directories that are not empty cannot be removed.
         if (!is_dir_empty(iptr)) {
             badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTEMPTY);
-            mutex_release(NULL, &RAMFS(vfs).mtx);
+            mutex_release(&RAMFS(vfs).mtx);
             return;
         }
     }
@@ -362,7 +362,7 @@ void fs_ramfs_unlink(
     // Remove directory entry.
     remove_dirent(vfs, dirptr, ent);
 
-    mutex_release(NULL, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
 }
 
 // Create a new hard link from one path to another relative to their respective dirs.
@@ -378,13 +378,13 @@ void fs_ramfs_link(
     if (new_name_len > VFS_RAMFS_NAME_MAX) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_TOOLONG);
     }
-    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     // Test whether the file already exists.
     fs_ramfs_inode_t  *dirptr   = RAMFILE(new_dir);
     fs_ramfs_dirent_t *existing = find_dirent(ec, vfs, dirptr, new_name, new_name_len);
     if (existing) {
-        mutex_release(NULL, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_EXISTS);
         return;
     }
@@ -405,7 +405,7 @@ void fs_ramfs_link(
         RAMFILE(old_obj)->links++;
     }
 
-    mutex_release(NULL, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
 }
 
 // Create a new symbolic link from one path to another, the latter relative to a dir handle.
@@ -463,7 +463,7 @@ static inline size_t convert_dirent(vfs_t *vfs, dirent_t *out, fs_ramfs_dirent_t
 // Read all entries from a directory.
 dirent_list_t fs_ramfs_dir_read(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir) {
     dirent_list_t res = {0};
-    assert_always(mutex_acquire_shared(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire_shared(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
     size_t            off  = 0;
     fs_ramfs_inode_t *iptr = RAMFILE(dir);
 
@@ -478,7 +478,7 @@ dirent_list_t fs_ramfs_dir_read(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir
     // Allocate memory.
     void *mem = malloc(cap);
     if (!mem) {
-        mutex_release_shared(NULL, &RAMFS(vfs).mtx);
+        mutex_release_shared(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOMEM);
         return res;
     }
@@ -497,7 +497,7 @@ dirent_list_t fs_ramfs_dir_read(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir
         res.ent_count++;
     }
 
-    mutex_release_shared(NULL, &RAMFS(vfs).mtx);
+    mutex_release_shared(&RAMFS(vfs).mtx);
     badge_err_set_ok(ec);
 
     return res;
@@ -535,7 +535,7 @@ void fs_ramfs_stat(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, stat_t *st
 
 // Open a file handle for the root directory.
 void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
-    assert_always(mutex_acquire_shared(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire_shared(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     // Install in shared file handle.
     fs_ramfs_inode_t *iptr = &RAMFS(vfs).inode_list[VFS_RAMFS_INODE_ROOT];
@@ -547,7 +547,7 @@ void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
 
     iptr->links++;
 
-    mutex_release_shared(NULL, &RAMFS(vfs).mtx);
+    mutex_release_shared(&RAMFS(vfs).mtx);
     badge_err_set_ok(ec);
 }
 
@@ -555,18 +555,18 @@ void fs_ramfs_root_open(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
 void fs_ramfs_file_open(
     badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *dir, vfs_file_obj_t *file, char const *name, size_t name_len
 ) {
-    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     // Look up the file in question.
     fs_ramfs_inode_t  *dirptr = RAMFILE(dir);
     fs_ramfs_dirent_t *ent    = find_dirent(ec, vfs, dirptr, name, name_len);
     if (!badge_err_is_ok(ec)) {
-        mutex_release(NULL, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         return;
     }
     if (!ent) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_NOTFOUND);
-        mutex_release(NULL, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         return;
     }
 
@@ -582,20 +582,20 @@ void fs_ramfs_file_open(
     file->size     = (fileoff_t)iptr->len;
     file->type     = (iptr->mode & VFS_RAMFS_MODE_MASK) >> VFS_RAMFS_MODE_BIT;
 
-    mutex_release(NULL, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
     badge_err_set_ok(ec);
 }
 
 // Close a file opened by `fs_ramfs_file_open`.
 // Only raises an error if `file` is an invalid file descriptor.
 void fs_ramfs_file_close(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file) {
-    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
     fs_ramfs_inode_t *inode = RAMFILE(file);
     if (inode->links == 0) {
         free(inode->buf);
         RAMFS(vfs).inode_usage[inode->inode] = false;
     }
-    mutex_release(NULL, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
     RAMFILE(file) = NULL;
     badge_err_set_ok(ec);
 }
@@ -608,20 +608,20 @@ void fs_ramfs_file_read(
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
         return;
     }
-    assert_always(mutex_acquire_shared(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire_shared(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     fs_ramfs_inode_t *iptr = RAMFILE(file);
 
     // Bounds check file and read offsets.
     if (offset + readlen > (ptrdiff_t)iptr->len || offset + readlen < offset) {
-        mutex_release_shared(NULL, &RAMFS(vfs).mtx);
+        mutex_release_shared(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
         return;
     }
 
     // Checks passed, return data.
     mem_copy(readbuf, iptr->buf + offset, readlen);
-    mutex_release_shared(NULL, &RAMFS(vfs).mtx);
+    mutex_release_shared(&RAMFS(vfs).mtx);
     badge_err_set_ok(ec);
 }
 
@@ -633,20 +633,20 @@ void fs_ramfs_file_write(
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
         return;
     }
-    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     fs_ramfs_inode_t *iptr = RAMFILE(file);
 
     // Bounds check file and read offsets.
     if (offset + writelen > (ptrdiff_t)iptr->len || offset + writelen < offset) {
-        mutex_release(ec, &RAMFS(vfs).mtx);
+        mutex_release(&RAMFS(vfs).mtx);
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
         return;
     }
 
     // Checks passed, update data.
     mem_copy(iptr->buf + offset, writebuf, writelen);
-    mutex_release(ec, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
 }
 
 // Change the length of a file opened by `fs_ramfs_file_open`.
@@ -655,7 +655,7 @@ void fs_ramfs_file_resize(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fil
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_RANGE);
         return;
     }
-    assert_always(mutex_acquire(NULL, &RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
+    assert_always(mutex_acquire(&RAMFS(vfs).mtx, TIMESTAMP_US_MAX));
 
     // Attempt to resize the buffer.
     fs_ramfs_inode_t *iptr     = RAMFILE(file);
@@ -668,7 +668,7 @@ void fs_ramfs_file_resize(badge_err_t *ec, vfs_t *vfs, vfs_file_obj_t *file, fil
         }
     }
 
-    mutex_release(NULL, &RAMFS(vfs).mtx);
+    mutex_release(&RAMFS(vfs).mtx);
 }
 
 

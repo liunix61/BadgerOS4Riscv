@@ -59,7 +59,7 @@ static void run_sighandler(int signum, uint64_t cause) {
     if (signum == SIGKILL || proc->sighandlers[signum] == SIG_DFL) {
         if ((SIG_DFL_KILL_MASK >> signum) & 1) {
             // Process didn't catch a signal that kills it.
-            mutex_acquire(NULL, &log_mtx, TIMESTAMP_US_MAX);
+            mutex_acquire(&log_mtx, TIMESTAMP_US_MAX);
             logkf_from_isr(LOG_ERROR, "Process %{d} received %{cs}", proc->pid, signames[signum]);
             if (signum == SIGSEGV) {
                 memmap_info(proc, cause);
@@ -77,7 +77,7 @@ static void run_sighandler(int signum, uint64_t cause) {
             mmu_disable_sum();
 #endif
             isr_ctx_dump(&thread->user_isr_ctx);
-            mutex_release(NULL, &log_mtx);
+            mutex_release(&log_mtx);
             // Finally, kill the process.
             proc_exit_self(W_SIGNALLED(signum));
         }
@@ -90,15 +90,15 @@ static void run_sighandler(int signum, uint64_t cause) {
 // Called in the kernel side of a user thread when a signal might be queued.
 void proc_signal_handler() {
     process_t *const proc = proc_current();
-    mutex_acquire(NULL, &proc->mtx, TIMESTAMP_US_MAX);
+    mutex_acquire(&proc->mtx, TIMESTAMP_US_MAX);
     if (proc->sigpending.len) {
         // Pop the first pending signal and run its handler.
         sigpending_t *node = (sigpending_t *)dlist_pop_front(&proc->sigpending);
-        mutex_release(NULL, &proc->mtx);
+        mutex_release(&proc->mtx);
         run_sighandler(node->signum, 0);
         free(node);
     } else {
-        mutex_release(NULL, &proc->mtx);
+        mutex_release(&proc->mtx);
     }
     irq_disable();
     sched_lower_from_isr();
@@ -115,7 +115,7 @@ static void trap_signal_handler(int signum, uint64_t cause) {
     int              current = sched_is_sighandler();
     if (current) {
         // If the thread is still running a signal handler, terminate the process.
-        mutex_acquire(NULL, &log_mtx, TIMESTAMP_US_MAX);
+        mutex_acquire(&log_mtx, TIMESTAMP_US_MAX);
         if (current > 0 && current < SIG_COUNT && signames[current]) {
             logkf_from_isr(
                 LOG_ERROR,
@@ -149,7 +149,7 @@ static void trap_signal_handler(int signum, uint64_t cause) {
         mmu_disable_sum();
 #endif
         isr_ctx_dump(&thread->user_isr_ctx);
-        mutex_release(NULL, &log_mtx);
+        mutex_release(&log_mtx);
         // Finally, kill the process.
         proc_exit_self(W_SIGNALLED(signum));
 
