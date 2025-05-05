@@ -106,10 +106,22 @@ int hk_add_once(timestamp_us_t time, hk_task_t task, void *arg) {
 // This task will be run in the "housekeeping" task.
 // Returns the task number.
 int hk_add_repeated(timestamp_us_t time, timestamp_us_t interval, hk_task_t task, void *arg) {
-    if (!task) {
-        return -1;
-    }
     mutex_acquire(&hk_mtx, TIMESTAMP_US_MAX);
+    int taskno = hk_add_repeated_presched(time, interval, task, arg);
+    mutex_release(&hk_mtx);
+    return taskno;
+}
+
+// Variant of `hk_add_once` that does not use the mutex.
+// WARNING: Only use before the scheduler has started!
+int hk_add_once_presched(timestamp_us_t time, hk_task_t task, void *arg) {
+    return hk_add_repeated_presched(time, 0, task, arg);
+}
+
+// Variant of `hk_add_repeated` that does not use the mutex.
+// WARNING: Only use before the scheduler has started!
+int hk_add_repeated_presched(timestamp_us_t time, timestamp_us_t interval, hk_task_t task, void *arg) {
+    assert_dev_drop(task != NULL);
 
     int       taskno = taskno_ctr;
     taskent_t ent    = {
@@ -127,7 +139,6 @@ int hk_add_repeated(timestamp_us_t time, timestamp_us_t interval, hk_task_t task
             array_lencap_sorted_insert(&queue, sizeof(taskent_t), &queue_len, &queue_cap, &ent, hk_task_time_cmp);
     }
 
-    mutex_release(&hk_mtx);
     return taskno;
 }
 

@@ -79,13 +79,9 @@ void  thread_detach(badge_err_t *ec, tid_t thread);
 
 // Explicitly yield to the scheduler; the scheduler may run other threads without waiting for preemption.
 // Use this function to reduce the CPU time used by a thread.
-void     thread_yield(void);
+void thread_yield(void);
 // Sleep for an amount of microseconds.
-void     thread_sleep(timestamp_us_t delay);
-// Get a new blocking ticket; to block the thread, run `thread_yield()`.
-uint64_t thread_block();
-// Unblock a thread.
-bool     thread_unblock(tid_t thread, uint64_t ticket);
+void thread_sleep(timestamp_us_t delay);
 
 // Pauses execution of a thread.
 // If `suspend_kernel` is false, the thread won't be suspended until it enters user mode.

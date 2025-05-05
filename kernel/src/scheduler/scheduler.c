@@ -12,13 +12,16 @@
 #include "housekeeping.h"
 #include "interrupt.h"
 #include "isr_ctx.h"
+#include "log.h"
 #include "malloc.h"
+#include "panic.h"
 #include "process/sighandler.h"
 #include "scheduler/cpu.h"
 #include "scheduler/isr.h"
 #include "scheduler/types.h"
 #include "smp.h"
 #include "spinlock.h"
+#include "time.h"
 
 
 
@@ -360,7 +363,7 @@ static void idle_func(void *arg) {
 
 // Global scheduler initialization.
 void sched_init() {
-    hk_add_repeated(0, 1000000, sched_housekeeping, NULL);
+    hk_add_repeated_presched(0, 1000000, sched_housekeeping, NULL);
 }
 
 // Power on and start scheduler on secondary CPUs.
@@ -527,6 +530,7 @@ tid_t thread_new_user(
     thread->priority              = priority;
     thread->process               = process;
     thread->id                    = atomic_fetch_add(&tid_counter, 1);
+    thread->blocking_lock         = SPINLOCK_T_INIT;
     thread->kernel_stack_top      = thread->kernel_stack_bottom + CONFIG_STACK_SIZE;
     thread->kernel_isr_ctx.flags  = ISR_CTX_FLAG_KERNEL;
     thread->kernel_isr_ctx.thread = thread;
@@ -583,6 +587,7 @@ tid_t thread_new_kernel(badge_err_t *ec, char const *name, sched_entry_t entrypo
 
     thread->priority               = priority;
     thread->id                     = atomic_fetch_add(&tid_counter, 1);
+    thread->blocking_lock          = SPINLOCK_T_INIT;
     thread->kernel_stack_top       = thread->kernel_stack_bottom + CONFIG_STACK_SIZE;
     thread->kernel_isr_ctx.flags   = ISR_CTX_FLAG_KERNEL;
     thread->kernel_isr_ctx.thread  = thread;
@@ -675,10 +680,17 @@ void syscall_thread_sleep(timestamp_us_t delay) {
 // Block this thread and return a blocking ticket.
 uint64_t thread_block() {
     assert_dev_drop(!irq_is_enabled());
+
     sched_thread_t *self = thread_dequeue_self();
-    self->unblock_cpu    = smp_cur_cpu();
+    spinlock_take(&self->blocking_lock);
+
+    self->unblock_cpu = smp_cur_cpu();
+    uint64_t ticket   = ++self->blocking_ticket;
     atomic_fetch_or(&self->flags, THREAD_BLOCKED);
-    return ++self->blocking_ticket;
+
+    spinlock_release(&self->blocking_lock);
+
+    return ticket;
 }
 
 // Unblock a thread.
@@ -686,13 +698,19 @@ bool thread_unblock(tid_t tid, uint64_t ticket) {
     bool ie = irq_disable();
     spinlock_take_shared(&threads_lock);
 
-    sched_thread_t *thread = find_thread(tid);
-    int             flags;
-    bool            success = thread && thread->blocking_ticket >= ticket &&
-                   ((flags = atomic_fetch_and(&thread->flags, ~THREAD_BLOCKED)) & THREAD_BLOCKED);
-    if (success) {
-        assert_dev_drop(ticket == thread->blocking_ticket);
-        thread_handoff(thread, thread->unblock_cpu);
+    sched_thread_t *thread  = find_thread(tid);
+    bool            success = false;
+
+    if (thread) {
+        spinlock_take(&thread->blocking_lock);
+
+        success =
+            thread->blocking_ticket == ticket && (atomic_fetch_and(&thread->flags, ~THREAD_BLOCKED) & THREAD_BLOCKED);
+        if (success) {
+            thread_handoff(thread, thread->unblock_cpu);
+        }
+
+        spinlock_release(&thread->blocking_lock);
     }
 
     spinlock_release_shared(&threads_lock);

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "filesystem.h"
+#include "mutex.h"
 #include "process/process.h"
 
 extern mutex_t proc_mtx;

@@ -5,6 +5,7 @@
 
 #include "fifo.h"
 #include "filesystem/vfs_internal.h"
+#include "scheduler/waitlist.h"
 #include "spinlock.h"
 
 // VFS information used to manage FIFOs.
@@ -20,14 +21,10 @@ struct vfs_fifo_obj {
     atomic_int read_count;
     // Number of writers.
     atomic_int write_count;
-    // List of tickets for threads blocked on read.
-    dlist_t    read_blocked;
-    // Spinlock for read blocked list.
-    spinlock_t read_blocked_lock;
-    // List of tickets for threads blocked on write.
-    dlist_t    write_blocked;
-    // Spinlock for write blocked list.
-    spinlock_t write_blocked_lock;
+    // Threads blocked on read.
+    waitlist_t read_blocked;
+    // Threads blocked on write.
+    waitlist_t write_blocked;
 };
 
 // Create a FIFO object.

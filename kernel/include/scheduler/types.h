@@ -83,7 +83,9 @@ struct sched_thread_t {
     int        unblock_cpu;
     // Exit code from `thread_exit`
     int        exit_code;
-    // Current blocking ticket; unblocking with a lower ticks does nothing.
+    // Blocking spinlock.
+    spinlock_t blocking_lock;
+    // Current blocking ticket; unblocking with a lower ticket does nothing.
     uint64_t   blocking_ticket;
 
     // ISR context for threads running in kernel mode.

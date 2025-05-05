@@ -20,3 +20,10 @@ int  hk_add_once(timestamp_us_t time, hk_task_t task, void *arg);
 int  hk_add_repeated(timestamp_us_t time, timestamp_us_t interval, hk_task_t task, void *arg);
 // Cancel a housekeeping task.
 void hk_cancel(int taskno);
+
+// Variant of `hk_add_once` that does not use the mutex.
+// WARNING: Only use before the scheduler has started!
+int hk_add_once_presched(timestamp_us_t time, hk_task_t task, void *arg);
+// Variant of `hk_add_repeated` that does not use the mutex.
+// WARNING: Only use before the scheduler has started!
+int hk_add_repeated_presched(timestamp_us_t time, timestamp_us_t interval, hk_task_t task, void *arg);

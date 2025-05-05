@@ -101,6 +101,7 @@ add_executable(${target}
     ${CMAKE_CURRENT_LIST_DIR}/src/process/syscall_util.c
     
     ${CMAKE_CURRENT_LIST_DIR}/src/scheduler/scheduler.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/scheduler/waitlist.c
     
     ${CMAKE_CURRENT_LIST_DIR}/src/housekeeping.c
     ${CMAKE_CURRENT_LIST_DIR}/src/interrupt.c

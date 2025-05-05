@@ -3,35 +3,22 @@
 
 #pragma once
 
-#include "list.h"
-#include "scheduler/scheduler.h"
+#include "scheduler/waitlist.h"
 #include "time.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
 
-// Semaphore waiting list entry.
-typedef struct {
-    // Linked list node.
-    dlist_node_t node;
-    // Thread ID.
-    tid_t        tid;
-    // Thread blocking ticket.
-    uint64_t     ticket;
-} sem_waiting_entry_t;
-
 // Semaphore.
 typedef struct {
     // Number of times posted.
-    atomic_int  available;
-    // Spinlock guarding the waiting list.
-    atomic_flag wait_spinlock;
+    atomic_int available;
     // Threads waiting for the semaphore to be posted.
-    dlist_t     waiting_list;
+    waitlist_t waiting_list;
 } sem_t;
 
 #define SEM_FAST_LOOPS 256
-#define SEM_T_INIT     ((sem_t){0, ATOMIC_FLAG_INIT, DLIST_EMPTY})
+#define SEM_T_INIT     {0, WAITLIST_T_INIT}
 
 // Initialize a new semaphore.
 void sem_init(sem_t *sem);

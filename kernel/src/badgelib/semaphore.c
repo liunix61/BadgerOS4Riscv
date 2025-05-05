@@ -4,22 +4,19 @@
 #include "semaphore.h"
 
 #include "assertions.h"
-#include "interrupt.h"
-#include "scheduler/isr.h"
-#include "scheduler/types.h"
+#include "scheduler/waitlist.h"
 
 
 
 // Initialize a new semaphore.
 void sem_init(sem_t *sem) {
-    *sem = SEM_T_INIT;
+    *sem = (sem_t)SEM_T_INIT;
     atomic_thread_fence(memory_order_release);
 }
 
 // Clean up a semaphore.
 void sem_destroy(sem_t *sem) {
-    assert_dev_drop(!atomic_flag_test_and_set(&sem->wait_spinlock));
-    assert_dev_drop(!sem->waiting_list.len);
+    assert_dev_drop(!sem->waiting_list.list.len);
 }
 
 // Reset the semaphore count.
@@ -30,59 +27,17 @@ void sem_reset(sem_t *sem) {
 // Post the semaphore once.
 void sem_post(sem_t *sem) {
     assert_dev_keep(atomic_fetch_add(&sem->available, 1) < __INT_MAX__);
-    irq_disable();
-    while (atomic_flag_test_and_set_explicit(&sem->wait_spinlock, memory_order_acquire));
-    sem_waiting_entry_t *first = (void *)dlist_pop_front(&sem->waiting_list);
-    if (first) {
-        thread_unblock(first->tid, first->ticket);
-    }
-    atomic_flag_clear_explicit(&sem->wait_spinlock, memory_order_release);
-    irq_enable();
+    waitlist_notify(&sem->waiting_list);
 }
 
-// Wake from teh timeout.
-static void sem_unblock_from_timer(void *cookie0) {
-    sem_waiting_entry_t *cookie = cookie0;
-    thread_unblock(cookie->tid, cookie->ticket);
+static bool sem_block_double_check(void *cookie) {
+    sem_t *sem = cookie;
+    return atomic_load_explicit(&sem->available, memory_order_relaxed) == 0;
 }
 
 // Block on a semaphore.
 static void sem_block(sem_t *sem, timestamp_us_t timeout) {
-    irq_disable();
-
-    sem_waiting_entry_t ent = {
-        .node   = DLIST_NODE_EMPTY,
-        .tid    = sched_current_tid(),
-        .ticket = thread_block(),
-    };
-    timertask_t task = {
-        .callback  = sem_unblock_from_timer,
-        .cookie    = &ent,
-        .timestamp = timeout,
-    };
-
-    while (atomic_flag_test_and_set_explicit(&sem->wait_spinlock, memory_order_acquire));
-    dlist_append(&sem->waiting_list, &ent.node);
-    atomic_flag_clear_explicit(&sem->wait_spinlock, memory_order_release);
-
-    if (timeout < TIMESTAMP_US_MAX) {
-        time_add_async_task(&task);
-    }
-
-    if (atomic_load_explicit(&sem->available, memory_order_relaxed)) {
-        thread_unblock(ent.tid, ent.ticket);
-        while (atomic_flag_test_and_set_explicit(&sem->wait_spinlock, memory_order_acquire));
-        if (ent.node.next) {
-            dlist_remove(&sem->waiting_list, &ent.node);
-        }
-        atomic_flag_clear_explicit(&sem->wait_spinlock, memory_order_release);
-    } else {
-        thread_yield();
-    }
-
-    if (timeout < TIMESTAMP_US_MAX) {
-        time_cancel_async_task(task.taskno);
-    }
+    waitlist_block(&sem->waiting_list, timeout, sem_block_double_check, sem);
 }
 
 // Await the semaphore.

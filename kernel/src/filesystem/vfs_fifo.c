@@ -4,8 +4,12 @@
 #include "filesystem/vfs_fifo.h"
 
 #include "assertions.h"
+#include "cpu/interrupt.h"
 #include "interrupt.h"
 #include "malloc.h"
+#include "scheduler/waitlist.h"
+#include "spinlock.h"
+#include "time.h"
 
 // FIFO object blocking ticket list entry.
 typedef struct {
@@ -24,9 +28,9 @@ vfs_fifo_obj_t *vfs_fifo_create() {
     vfs_fifo_obj_t *fobj = calloc(1, sizeof(vfs_fifo_obj_t));
 
     if (fobj) {
-        fobj->buffer_lock        = SPINLOCK_T_INIT_SHARED;
-        fobj->read_blocked_lock  = SPINLOCK_T_INIT;
-        fobj->write_blocked_lock = SPINLOCK_T_INIT;
+        fobj->buffer_lock   = SPINLOCK_T_INIT_SHARED;
+        fobj->read_blocked  = (waitlist_t)WAITLIST_T_INIT;
+        fobj->write_blocked = (waitlist_t)WAITLIST_T_INIT;
     }
 
     return fobj;
@@ -79,30 +83,48 @@ static bool vfs_fifo_rw_unblock_check(vfs_fifo_obj_t *fifo, bool as_read) {
     return false;
 }
 
+// Checks the possible conditions for unblocking for a FIFO.
+// If `as_open` is true, `buffer_lock` is taken exclusive, not shared.
+// Interrupts muse be disabled and will remain so.
+static bool vfs_fifo_unblock_check(void *cookie) {
+    struct {
+        vfs_fifo_obj_t *fifo;
+        bool            as_read;
+        bool            as_open;
+        bool            did_take_lock;
+    } *data = cookie;
+    if (data->as_open) {
+        data->did_take_lock = vfs_fifo_open_unblock_check(data->fifo, data->as_read);
+    } else {
+        data->did_take_lock = vfs_fifo_rw_unblock_check(data->fifo, data->as_read);
+    }
+    return !data->did_take_lock;
+}
+
 // Block on a FIFO and take `buffer_lock` afterwards.
 // If `as_open` is true, `buffer_lock` is taken exclusive, not shared.
+// Interrupts muse be disabled and will remain so.
 static void vfs_fifo_block(vfs_fifo_obj_t *fifo, bool as_read, bool as_open) {
-    dlist_t    *list = as_read ? &fifo->read_blocked : &fifo->write_blocked;
-    spinlock_t *lock = as_read ? &fifo->read_blocked_lock : &fifo->write_blocked_lock;
-
-    irq_disable();
-
-    // Insert new blocking ticket into the list.
-    vfs_fifo_ticket_t ent;
-    ent.thread = sched_current_tid();
-    ent.ticket = thread_block();
-    spinlock_take(lock);
-    dlist_append(list, &ent.node);
-    spinlock_release(lock);
-
-    // Double-check blocking condition.
-    if (as_open ? vfs_fifo_open_unblock_check(fifo, as_read) : vfs_fifo_rw_unblock_check(fifo, as_read)) {
-        // Race condition: The condition to block is no longer satisfied.
-        thread_unblock(sched_current_tid(), ent.ticket);
-    } else {
-        // The condition to block is satisfied after the ticket as added to waiting list;
-        // It is now time to yield and therefor block until notified.
-        thread_yield();
+    assert_dev_drop(!irq_is_enabled());
+    waitlist_t *list = as_read ? &fifo->read_blocked : &fifo->write_blocked;
+    struct {
+        vfs_fifo_obj_t *fifo;
+        bool            as_read;
+        bool            as_open;
+        bool            did_take_lock;
+    } data = {
+        fifo,
+        as_read,
+        as_open,
+        false,
+    };
+    waitlist_block(list, TIMESTAMP_US_MAX, vfs_fifo_unblock_check, &data);
+    if (!data.did_take_lock) {
+        if (as_open) {
+            spinlock_take(&fifo->buffer_lock);
+        } else {
+            spinlock_take_shared(&fifo->buffer_lock);
+        }
     }
 }
 
@@ -110,20 +132,14 @@ static void vfs_fifo_block(vfs_fifo_obj_t *fifo, bool as_read, bool as_open) {
 // Interrupts muse be disabled and will remain so.
 static void vfs_fifo_notify(vfs_fifo_obj_t *fifo, bool notify_readers) {
     assert_dev_drop(!irq_is_enabled());
-    dlist_t    *list = notify_readers ? &fifo->read_blocked : &fifo->write_blocked;
-    spinlock_t *lock = notify_readers ? &fifo->read_blocked_lock : &fifo->write_blocked_lock;
-
-    spinlock_take(lock);
-    vfs_fifo_ticket_t *ent = (void *)list->head;
-    while (ent) {
-        thread_unblock(ent->thread, ent->ticket);
-        ent = (void *)ent->node.next;
-    }
-    spinlock_release(lock);
+    waitlist_t *list = notify_readers ? &fifo->read_blocked : &fifo->write_blocked;
+    waitlist_notify(list);
 }
 
 // Handle a file open for a FIFO.
 void vfs_fifo_open(badge_err_t *ec, vfs_fifo_obj_t *fifo, bool nonblock, bool read, bool write) {
+    assert_dev_keep(irq_disable());
+
     // Open would never block if opened as O_RDWR.
     nonblock |= read && write;
 
@@ -137,7 +153,6 @@ void vfs_fifo_open(badge_err_t *ec, vfs_fifo_obj_t *fifo, bool nonblock, bool re
     if (!nonblock) {
         vfs_fifo_block(fifo, read, true);
     } else {
-        irq_disable();
         spinlock_take(&fifo->buffer_lock);
     }
 
@@ -168,10 +183,10 @@ void vfs_fifo_close(vfs_fifo_obj_t *fifo, bool had_read, bool had_write) {
 // Handle a file read for a FIFO.
 // WARNING: May sporadically return 0 in a blocking multi-read scenario.
 fileoff_t vfs_fifo_read(badge_err_t *ec, vfs_fifo_obj_t *fifo, bool nonblock, uint8_t *readbuf, fileoff_t readlen) {
+    assert_dev_keep(irq_disable());
     if (!nonblock) {
         vfs_fifo_block(fifo, true, false);
     } else {
-        irq_disable();
         spinlock_take_shared(&fifo->buffer_lock);
     }
 
@@ -201,6 +216,7 @@ fileoff_t vfs_fifo_read(badge_err_t *ec, vfs_fifo_obj_t *fifo, bool nonblock, ui
 fileoff_t vfs_fifo_write(
     badge_err_t *ec, vfs_fifo_obj_t *fifo, bool nonblock, bool enforce_open, uint8_t const *writebuf, fileoff_t writelen
 ) {
+    assert_dev_keep(irq_disable());
     if (enforce_open && !atomic_load(&fifo->read_count)) {
         badge_err_set(ec, ELOC_FILESYSTEM, ECAUSE_PIPE_CLOSED);
         return 0;
@@ -209,7 +225,6 @@ fileoff_t vfs_fifo_write(
     if (!nonblock) {
         vfs_fifo_block(fifo, false, false);
     } else {
-        irq_disable();
         spinlock_take_shared(&fifo->buffer_lock);
     }
 

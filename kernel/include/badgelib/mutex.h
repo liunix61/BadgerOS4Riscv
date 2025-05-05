@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "list.h"
+#include "scheduler/waitlist.h"
 #include "time.h"
 
 #include <stdatomic.h>
@@ -12,30 +12,17 @@
 // A mutex.
 typedef struct {
     // Mutex allows sharing.
-    bool        is_shared;
-    // Spinlock guarding the waiting list.
-    atomic_flag wait_spinlock;
+    bool       is_shared;
     // Share count and/or is locked.
-    atomic_int  shares;
+    atomic_int shares;
     // List of threads waiting for this mutex.
-    dlist_t     waiting_list;
+    waitlist_t waiting_list;
 } mutex_t;
 
-#include "scheduler/scheduler.h"
-
-// Mutex waiting list entry.
-typedef struct {
-    // Linked list node.
-    dlist_node_t node;
-    // Thread ID.
-    tid_t        tid;
-    // Thread blocking ticket.
-    uint64_t     ticket;
-} mutex_waiting_entry_t;
 
 #define MUTEX_FAST_LOOPS    256
-#define MUTEX_T_INIT        ((mutex_t){0, ATOMIC_FLAG_INIT, 0, {0}})
-#define MUTEX_T_INIT_SHARED ((mutex_t){1, ATOMIC_FLAG_INIT, 0, {0}})
+#define MUTEX_T_INIT        {0, 0, WAITLIST_T_INIT}
+#define MUTEX_T_INIT_SHARED {1, 0, WAITLIST_T_INIT}
 
 
 
